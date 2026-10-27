@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-domain-and-data:
+    name: Mobile domain and sample data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+      - name: Mobile domain tests
+        working-directory: mobile
+        run: npm test
+      - name: Bundle Android JavaScript
+        working-directory: mobile
+        run: npx expo export --platform android
+      - name: Sample station data tests
+        run: python3 -m unittest discover -s data/tests -v
+
+  server:
+    name: Server build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build and test server
+        working-directory: server
+        run: mvn --batch-mode --no-transfer-progress verify
+      - name: Run standalone tracking engine tests
+        working-directory: server
+        run: |
+          mkdir -p /tmp/subway-server-test
+          javac -d /tmp/subway-server-test \
+            src/main/java/com/subwayalert/server/domain/TrackingEngine.java \
+            src/test/java/com/subwayalert/server/domain/TrackingEngineTest.java
+          java -cp /tmp/subway-server-test com.subwayalert.server.domain.TrackingEngineTest
+
+  android-test-apk:
+    # A normal assembleDebug APK generally needs Metro. Build the release
+    # variant to embed JavaScript, but retain Expo's generated debug signing.
+    # This is an internal test artifact, never a Google Play release.
+    name: Standalone Android test APK (ARM64, debug signed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install and generate Android project
+        working-directory: mobile
+        run: |
+          npm ci
+          npx expo prebuild --no-install --platform android
+      - name: Build standalone test APK
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+      - name: Verify APK and prepare download
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk artifacts/subway-alert-test-arm64.apk
+          python3 - <<'PY'
+          import zipfile
+          path = 'artifacts/subway-alert-test-arm64.apk'
+          with zipfile.ZipFile(path) as apk:
+              assert apk.testzip() is None, 'APK archive is corrupt'
+              assert apk.getinfo('assets/index.android.bundle').file_size > 0, 'JavaScript bundle is missing'
+          PY
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose artifacts/subway-alert-test-arm64.apk
+          sha256sum artifacts/subway-alert-test-arm64.apk > artifacts/SHA256SUMS.txt
+          cat > artifacts/TEST-BUILD.txt <<'EOF'
+          Internal test APK only. ARM64 Android 7.0+ device required.
+          JavaScript is embedded; Metro is not required.
+          The release variant is signed with Expo's generated Android Debug key.
+          This is not a production signing key and must not be submitted to Google Play.
+          Firebase configuration and credentials are not included in this CI build.
+          FCM token registration/remote notification delivery cannot be tested with this APK.
+          Actual subway alighting alerts remain disabled; sample/test features are not reliable travel guidance.
+          EOF
+      - name: Upload internal test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: subway-alert-test-arm64-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

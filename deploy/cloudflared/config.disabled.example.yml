@@ -1,0 +1,14 @@
+# Disabled named-tunnel template; NOT used by compose.yaml.
+# Cloudflare Tunnel forwards to an already-running backend. It does not host it.
+# Do not enable a hostname until API authentication, quota protection, TLS routing,
+# Cloudflare credentials and device access policy have been configured and tested.
+tunnel: REPLACE_WITH_NAMED_TUNNEL_UUID
+credentials-file: /absolute/private/path/REPLACE_WITH_NAMED_TUNNEL_UUID.json
+
+ingress:
+  # Only after the above gates pass, an administrator may add a hostname rule:
+  # - hostname: api.example.com
+  #   service: http://127.0.0.1:8080
+  # This assumes cloudflared runs on the Docker HOST, not in another container.
+  # If BACKEND_PORT is changed, the local service port must match it.
+  - service: http_status:404

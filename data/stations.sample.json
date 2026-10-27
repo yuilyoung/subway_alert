@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "source": "sample",
+  "notice": "데모용 일부 구간. 좌표와 역 시설은 확인되지 않아 제공하지 않습니다.",
+  "route": {
+    "lineId": "2",
+    "isComplete": false,
+    "isCircular": false
+  },
+  "stations": [
+    {
+      "id": "demo-2-219",
+      "name": "삼성",
+      "lineId": "2",
+      "order": 0,
+      "latitude": null,
+      "longitude": null,
+      "facilities": {
+        "fastTransfer": null,
+        "restrooms": null,
+        "amenities": null,
+        "ticketGates": null,
+        "exits": null
+      }
+    },
+    {
+      "id": "demo-2-220",
+      "name": "선릉",
+      "lineId": "2",
+      "order": 1,
+      "latitude": null,
+      "longitude": null,
+      "facilities": {
+        "fastTransfer": null,
+        "restrooms": null,
+        "amenities": null,
+        "ticketGates": null,
+        "exits": null
+      }
+    },
+    {
+      "id": "demo-2-221",
+      "name": "역삼",
+      "lineId": "2",
+      "order": 2,
+      "latitude": null,
+      "longitude": null,
+      "facilities": {
+        "fastTransfer": null,
+        "restrooms": null,
+        "amenities": null,
+        "ticketGates": null,
+        "exits": null
+      }
+    },
+    {
+      "id": "demo-2-222",
+      "name": "강남",
+      "lineId": "2",
+      "order": 3,
+      "latitude": null,
+      "longitude": null,
+      "facilities": {
+        "fastTransfer": null,
+        "restrooms": null,
+        "amenities": null,
+        "ticketGates": null,
+        "exits": null
+      }
+    },
+    {
+      "id": "demo-2-223",
+      "name": "교대",
+      "lineId": "2",
+      "order": 4,
+      "latitude": null,
+      "longitude": null,
+      "facilities": {
+        "fastTransfer": null,
+        "restrooms": null,
+        "amenities": null,
+        "ticketGates": null,
+        "exits": null
+      }
+    }
+  ]
+}
