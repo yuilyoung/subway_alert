@@ -67,6 +67,22 @@ class ApiTokenSetupTests(unittest.TestCase):
             keys = [self.read_tokens(output, 1)[0] for output in outputs]
             self.assertTrue(keys[0] != keys[1], 'separate token files must use different keys')
 
+    def test_postgres_option_adds_a_distinct_private_password(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / '.env.postgres'
+            result = self.run_generator(output, '--postgres', '--count', '2')
+            self.assertEqual(result.returncode, 0, 'PostgreSQL env generation must succeed')
+            values = dict(line.split('=', 1) for line in output.read_text().splitlines())
+            self.assertEqual(set(values), {'BACKEND_PORT', 'SUBWAY_API_TOKENS', 'MONITOR_DB_PASSWORD'})
+            password = values['MONITOR_DB_PASSWORD']
+            self.assertRegex(password, r'^[A-Za-z0-9_-]{43}$')
+            self.assertNotIn(password, values['SUBWAY_API_TOKENS'].split(','))
+            self.assert_private_output(result, output, [password, *values['SUBWAY_API_TOKENS'].split(',')])
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            duplicate = self.run_generator(output, '--postgres')
+            self.assertNotEqual(duplicate.returncode, 0)
+            self.assertEqual(values, dict(line.split('=', 1) for line in output.read_text().splitlines()))
+
     def test_invalid_counts_do_not_create_files(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / '.env'

@@ -53,6 +53,64 @@ jobs:
             src/test/java/com/subwayalert/server/domain/TrackingEngineTest.java
           java -cp /tmp/subway-server-test com.subwayalert.server.domain.TrackingEngineTest
 
+  postgres-durability:
+    name: Real PostgreSQL durable receipt integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: subway_alert_test
+          POSTGRES_USER: subway_alert_test
+          # Disposable isolated CI service only; never a deployment credential.
+          POSTGRES_PASSWORD: durable-ci-test-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U subway_alert_test -d subway_alert_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client
+      - name: Package server with tests
+        working-directory: server
+        run: mvn --batch-mode --no-transfer-progress verify
+      - name: Verify real receipt durability and storage outage behavior
+        env:
+          TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+        # Construct the URL inside the process: Actions otherwise prints step
+        # environment values. Mask it before launching any child process.
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+          environment = dict(os.environ)
+          environment.update(
+              SUBWAY_POSTGRES_TEST_ONLY='1',
+              MONITOR_DB_URL='jdbc:postgresql://' + '127.0.0.1:' + os.environ['TEST_POSTGRES_PORT'] + '/subway_alert_test',
+              MONITOR_DB_USER='subway_alert_test',
+              MONITOR_DB_PASSWORD='durable-ci-test-only',
+          )
+          for name in ('MONITOR_DB_URL', 'MONITOR_DB_PASSWORD'):
+              print('::add-mask::' + environment[name], flush=True)
+          raise SystemExit(subprocess.run([
+              sys.executable, 'deploy/smoke_postgres.py', '--jar',
+              'server/target/subway-alert-server-0.1.0.jar',
+          ], env=environment, check=False).returncode)
+          PY
+
   docker-backend:
     name: Docker backend runtime and API checks
     runs-on: ubuntu-latest

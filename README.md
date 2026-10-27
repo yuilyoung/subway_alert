@@ -11,7 +11,7 @@
 | 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | CI #20의 실제 이미지·기동·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
 | Cloudflare Tunnel | 실행 중인 API를 HTTPS 주소로 연결 | 개발 기기 검증용 연결 수단 | 계정·도메인·터널 미구성, 템플릿만 작성 |
 | 운영 백엔드 호스트 | API·스케줄러 24시간 실행 | 상시 실행 Linux 서버 + Docker | VPS 업체·리전·요금 미선정, 서버 미생성 |
-| Supabase | 향후 PostgreSQL 영속 저장 | 운영 데이터 저장 목표 | 이 앱에 연결할 프로젝트 미확정, 스키마 초안 미적용 |
+| PostgreSQL / Supabase | TEST 등록 기록 저장 / 향후 운영 DB | 선택형 로컬 PostgreSQL, 클라우드는 Supabase 목표 | 로컬 저장 구현, Supabase 프로젝트 미확정·미적용 |
 | Firebase FCM | Android 원격 푸시 전달 | 시험 알림 전송 코드 구현 | 실제 자격 증명·기기 수신 미검증 |
 | GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | CI #17의 시험 APK 성공, CI #20의 Docker 작업 성공 |
 | Google Play | 앱 설치·업데이트 유통 | Android 정식 배포처 | 계정·앱 등록·심사 미진행 |
@@ -33,7 +33,8 @@ flowchart TD
     Host --> Seoul["서울 API: 공개 샘플만 검증"]
     Host --> FCM["Firebase FCM: 실제 수신 미검증"]
     FCM --> App
-    Host -. "영속 저장: 미연동" .-> DB["Supabase PostgreSQL"]
+    Host --> LocalDB["선택형 로컬 PostgreSQL: TEST 등록 기록"]
+    Host -. "운영 연동 미완료" .-> DB["Supabase PostgreSQL"]
 ```
 
 ## 현재 구현 범위
@@ -42,7 +43,8 @@ flowchart TD
 - 열차 조회: 서버를 통한 서울 공개 sample 응답 최대 5건, 번호·방향·시각 표시와 선택.
 - 시험 감시: TEST 세션 등록·조회·취소, 공유 샘플 폴링, FCM 시험 요청과 상태 표시. FCM_ACCEPTED는 휴대폰 수신 확인이 아닙니다.
 - 보호 장치: 개발 기기별 Bearer 키, 전체·키별·등록·직접 조회 호출 제한, LIVE 감시 차단, 오래된 정보·다른 열차 제외, 시험 전용 문구, 짧은 FCM 만료시간.
-- 미완료: 실제 경로·방향·시간대 검증, 실키 HTTPS, Firebase 기기 수신, 전체 역·시설, DB 영속 저장·사용자 인증·운영 쿼터·복구.
+- 등록 복구: 선택형 PostgreSQL에 등록·취소 기록과 해시를 저장합니다. 서버 재시작 시 기록을 복원하고 진행 중 감시는 종료합니다. 기본 메모리 모드는 재시작하면 기록이 사라집니다.
+- 미완료: 실제 경로·방향·시간대 검증, 실키 HTTPS, Firebase 기기 수신, 전체 역·시설, Supabase 운영 연결·사용자 인증·분산 쿼터·운영 복구.
 
 ## 로컬에서 시작하기
 
@@ -56,6 +58,8 @@ docker compose --env-file .env up --build --wait --wait-timeout 180
 curl http://127.0.0.1:8080/api/health
 docker compose down
 ```
+
+재시작 후에도 TEST 등록 기록을 유지하려면 [PostgreSQL 저장 안내](docs/durable-receipts.md)의 별도 Compose 구성을 사용합니다. 외부 API 키나 Supabase 계정 없이 실행할 수 있으며 DB 비밀번호는 생성 도구가 만듭니다. FCM·서울 API 실제 키를 연결하는 설정과는 별개입니다.
 
 기본 구성은 호스트의 127.0.0.1:8080에만 포트를 엽니다. [배포 실행 안내](docs/deployment.md)에서 환경변수·실행·중지 절차를 확인하세요. 키를 설정하지 않으면 정확히 `GET /api/health` 외에는 503, 설정 후 키가 없거나 잘못되면 401, 호출 예산을 넘으면 429와 `Retry-After`를 반환합니다. localhost와 프록시 요청도 인증이 필요합니다. 세션 조회·취소에는 Bearer 키와 기존 `X-Session-Token`이 모두 필요합니다.
 
@@ -106,7 +110,8 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 | 서울 실시간 API 키 | 서버 SEOUL_SUBWAY_KEY | 샘플만 검증, 실키 HTTPS 미검증 |
 | Cloudflare 계정·도메인·터널 자격 증명 | 운영자 PC/서버 비밀 저장소 | 미구성 |
 | Google Play 계정·업로드 키 | Play Console·보호된 빌드 비밀 | 미구성 |
-| Supabase 프로젝트·DB 연결 정보 | 백엔드 환경 설정 | 미확정·미연동 |
+| 로컬 PostgreSQL 비밀번호 | --postgres 생성 도구 → 백엔드 환경 설정 | 외부 계정 없이 선택형 저장 시험 |
+| Supabase 프로젝트·DB 연결 정보 | 백엔드 환경 설정 | 운영 프로젝트 미확정·미연동 |
 
 서버 서비스 계정 키·서울 키·터널 자격 증명·정식 서명 키를 저장소나 앱에 넣지 않습니다. 무료 플랜이 있더라도 호스트·도메인·전기·상시 가동·사용량 비용까지 무료라고 보장하지 않습니다.
 
@@ -121,6 +126,8 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
 
-다음 순서는 개발 PC Docker 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.
+다음 순서는 개발 PC의 선택형 DB 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → Supabase 운영 DB·백업·모니터링 준비 → VPS 업체·예산 확정 → Google Play 출시입니다.
 
-감시 등록은 ID·세션 비밀을 기기에 먼저 보관해 응답 유실 뒤 같은 요청을 조회·재시도·종료하도록 구현합니다. 오래된 관측의 재등록과 앱 복원 시 자동 POST는 차단합니다. 새 필수 등록 헤더가 포함된 앱 빌드가 필요하며 프로세스 재시작·다중 인스턴스 복구는 후속 작업입니다. [등록 응답 유실과 복구](docs/registration-recovery.md)를 참고하세요.
+감시 등록은 ID·세션 비밀을 기기에 먼저 보관해 응답 유실 뒤 같은 요청을 조회·재시도·종료하도록 구현합니다. 오래된 관측의 재등록과 앱 복원 시 자동 POST는 차단합니다. PostgreSQL 모드는 기록을 보존하고 같은 DB에 두 번째 백엔드를 실행하지 못하게 합니다. 진행 중 감시의 자동 재개나 분산 실행을 제공하지 않습니다. [등록 응답 유실과 복구](docs/registration-recovery.md), [DB 저장과 재시작](docs/durable-receipts.md)을 참고하세요.
+
+선택형 DB 저장 변경의 실제 로컬 검사와 CI 범위는 [영속 저장 검증 기록](docs/verification-durability.md)에 구분합니다.

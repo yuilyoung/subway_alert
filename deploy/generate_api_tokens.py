@@ -22,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True, help='new environment file path')
     parser.add_argument('--count', type=token_count, default=1, help='number of tester keys (1–20)')
+    parser.add_argument('--postgres', action='store_true', help='also generate a local PostgreSQL password')
     arguments = parser.parse_args()
 
     # O_EXCL refuses regular files and symlinks, including dangling symlinks.
@@ -37,6 +38,8 @@ def main():
             os.fchmod(output.fileno(), 0o600)
             tokens = ','.join(secrets.token_urlsafe(32) for _ in range(arguments.count))
             output.write('BACKEND_PORT=8080\nSUBWAY_API_TOKENS=' + tokens + '\n')
+            if arguments.postgres:
+                output.write('MONITOR_DB_PASSWORD=' + secrets.token_urlsafe(32) + '\n')
     except OSError:
         print('Could not write token file; check the private file and choose a new output path.',
               file=sys.stderr)

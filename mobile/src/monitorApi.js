@@ -28,7 +28,7 @@ async function monitorRequest(server,session,action,development=false,fetchImpl,
  const data=await requestJson(base,`/api/monitor-sessions/${session.id}${path}`,{method,headers:{'X-Session-Token':session.sessionToken}},accessToken,development,fetchImpl);
  if(!data||data.id!==session.id||!STATES.includes(data.status)||data.mode!=='TEST'||!validTime(data.expiresAt))throw new Error('서버 응답 형식이 올바르지 않습니다.');
  const deliveryStatus=data.deliveryStatus??'NONE',pollStatus=data.pollStatus??'NOT_POLLED';
- if(!['NONE','SENDING','FCM_ACCEPTED','UNAVAILABLE','FAILED'].includes(deliveryStatus)||!['NOT_POLLED','SAMPLE_PARTIAL','SOURCE_BLOCKED','PROVIDER_ERROR','DAILY_LIMIT'].includes(pollStatus))throw new Error('서버 응답 형식이 올바르지 않습니다.');
+ if(!['NONE','SENDING','UNKNOWN','FCM_ACCEPTED','UNAVAILABLE','FAILED'].includes(deliveryStatus)||!['NOT_POLLED','SAMPLE_PARTIAL','SOURCE_BLOCKED','PROVIDER_ERROR','DAILY_LIMIT'].includes(pollStatus))throw new Error('서버 응답 형식이 올바르지 않습니다.');
  return {status:data.status,mode:'TEST',expiresAt:data.expiresAt||null,deliveryStatus,pollStatus};
 }
 async function cancelStaleSession(session,development,fetchImpl,deleteStored,accessToken=session?.accessToken){
