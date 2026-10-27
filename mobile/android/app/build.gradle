@@ -1,0 +1,50 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'com.facebook.react'
+if (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }
+
+react { autolinkLibrariesWithApp() }
+android {
+    namespace 'com.subwayalert'
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId 'com.subwayalert'
+        minSdk rootProject.ext.minSdkVersion
+        targetSdk rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'boolean', 'ALLOW_LOCAL_HTTP', 'false'
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+    kotlinOptions { jvmTarget = '17' }
+    buildTypes {
+        debug { buildConfigField 'boolean', 'ALLOW_LOCAL_HTTP', 'true' }
+        release { minifyEnabled false }
+        preview {
+            initWith release
+            matchingFallbacks = ['release']
+            signingConfig signingConfigs.debug
+            applicationIdSuffix '.preview'
+            versionNameSuffix '-preview'
+            buildConfigField 'boolean', 'ALLOW_LOCAL_HTTP', 'true'
+        }
+    }
+}
+dependencies {
+    implementation('com.facebook.react:react-android')
+    implementation('com.facebook.react:hermes-android')
+    implementation(platform('com.google.firebase:firebase-bom:34.4.0'))
+    implementation('com.google.firebase:firebase-auth')
+    implementation('com.google.firebase:firebase-messaging')
+    implementation('com.google.android.gms:play-services-location:21.3.0')
+    implementation('androidx.core:core-ktx:1.16.0')
+    implementation('androidx.work:work-runtime-ktx:2.10.1')
+    coreLibraryDesugaring('com.android.tools:desugar_jdk_libs:2.1.5')
+}
