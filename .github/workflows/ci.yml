@@ -19,7 +19,7 @@ jobs:
         with: {node-version: '22'}
       - run: npm install --global typescript@5.8.3
       - run: bash tools/test-core.sh
-      - run: python -m unittest discover -s tools -p 'test_catalog.py'
+      - run: python -m unittest discover -s tools -p 'test_*.py'
   server:
     runs-on: ubuntu-latest
     services:
@@ -45,6 +45,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: server-tests, path: server/target/surefire-reports/}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: subway-alert-server
+          path: server/target/subway-alert-server-0.1.0.jar
+          if-no-files-found: error
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -60,6 +65,10 @@ jobs:
           npm install --package-lock-only
           npm ci
       - run: npm --prefix mobile run typecheck
+      - name: Record dependency audit (non-blocking)
+        working-directory: mobile
+        continue-on-error: true
+        run: npm audit --json > npm-audit.json
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '9.3.1'}
       - uses: android-actions/setup-android@v3
@@ -69,11 +78,19 @@ jobs:
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
       - name: Build standalone preview (synthetic/demo only; no Firebase secrets)
         run: gradle -p mobile/android :app:assemblePreview --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: Upload preview APK
+        uses: actions/upload-artifact@v4
         with:
           name: subway-alert-preview
+          path: mobile/android/app/build/outputs/apk/preview/*.apk
+          if-no-files-found: error
+          compression-level: 0
+      - name: Upload dependency evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-dependency-evidence
           path: |
-            mobile/android/app/build/outputs/apk/preview/*.apk
             mobile/package-lock.json
+            mobile/npm-audit.json
           if-no-files-found: warn

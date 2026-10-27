@@ -6,6 +6,7 @@ node_modules/
 **/local.properties
 **/google-services.json
 **/service-account*.json
+**/*firebase-adminsdk*.json
 .env
 .env.*
 !.env.example
