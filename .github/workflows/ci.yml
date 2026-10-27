@@ -1,0 +1,71 @@
+name: Verify subway alert
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21'}
+      - uses: actions/setup-node@v5
+        with: {node-version: '22'}
+      - run: npm install --global typescript@5.8.3
+      - run: bash tools/test-core.sh
+      - run: python -m unittest discover -s tools -p 'test_catalog.py'
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_DB: subway, POSTGRES_USER: subway, POSTGRES_PASSWORD: ci-only-password}
+        ports: ['5432:5432']
+        options: --health-cmd 'pg_isready -U subway -d subway' --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      SUPABASE_DB_URL: jdbc:postgresql://localhost:5432/subway
+      SUPABASE_DB_USER: subway
+      SUPABASE_DB_PASSWORD: ci-only-password
+      RUN_DB_TESTS: 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '21', cache: maven, cache-dependency-path: server/pom.xml}
+      - run: mvn -B -f server/pom.xml verify
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: server-tests, path: server/target/surefire-reports/}
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: actions/setup-node@v5
+        with: {node-version: '22'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.3.1'}
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+      - name: Install JavaScript dependencies
+        working-directory: mobile
+        run: |
+          npm install --package-lock-only
+          npm ci
+      - run: npm --prefix mobile run typecheck
+      - name: Build standalone preview (synthetic/demo only; no Firebase secrets)
+        run: gradle -p mobile/android :app:assemblePreview --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: subway-alert-preview
+          path: |
+            mobile/android/app/build/outputs/apk/preview/*.apk
+            mobile/package-lock.json
+          if-no-files-found: error

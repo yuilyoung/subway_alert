@@ -1,0 +1,27 @@
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+spring:
+  datasource:
+    url: ${SUPABASE_DB_URL:jdbc:postgresql://localhost:5432/subway}
+    username: ${SUPABASE_DB_USER:subway}
+    password: ${SUPABASE_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 5
+  flyway:
+    enabled: true
+    default-schema: app_private
+    schemas: app_private
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+app:
+  demo: false
+  scheduling: true
+  topis-key: ${TOPIS_API_KEY:}
+  topis-base-url: ${TOPIS_BASE_URL:https://swopenapi.seoul.go.kr/api/subway}
+  topis-daily-budget: ${TOPIS_DAILY_BUDGET:9000}
+  firebase-project-id: ${FIREBASE_PROJECT_ID:}

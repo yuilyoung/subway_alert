@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+# Text-only Gradle bootstrap. Verify the official distribution checksum before execution.
+set -eu
+VERSION=9.3.1
+CACHE="${GRADLE_USER_HOME:-$HOME/.gradle}/subway-bootstrap"
+HOME_DIR="$CACHE/gradle-$VERSION"
+if [ ! -x "$HOME_DIR/bin/gradle" ]; then
+  command -v curl >/dev/null || { echo 'curl is required' >&2; exit 1; }
+  command -v unzip >/dev/null || { echo 'unzip is required' >&2; exit 1; }
+  mkdir -p "$CACHE"
+  TEMP=$(mktemp -d "$CACHE/download.XXXXXX")
+  trap 'rm -rf "$TEMP"' EXIT HUP INT TERM
+  curl --fail --location --retry 2 "https://services.gradle.org/distributions/gradle-$VERSION-bin.zip" -o "$TEMP/gradle.zip"
+  curl --fail --location --retry 2 "https://services.gradle.org/distributions/gradle-$VERSION-bin.zip.sha256" -o "$TEMP/checksum"
+  EXPECTED=$(tr -d '[:space:]' < "$TEMP/checksum")
+  if command -v sha256sum >/dev/null; then ACTUAL=$(sha256sum "$TEMP/gradle.zip" | cut -d ' ' -f 1)
+  else ACTUAL=$(shasum -a 256 "$TEMP/gradle.zip" | cut -d ' ' -f 1); fi
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo 'Gradle checksum mismatch' >&2; exit 1; }
+  unzip -q "$TEMP/gradle.zip" -d "$TEMP"
+  mv "$TEMP/gradle-$VERSION" "$HOME_DIR"
+fi
+exec "$HOME_DIR/bin/gradle" "$@"
