@@ -8,12 +8,12 @@
 
 | 구성 | 역할 | 개발·운영 기준 | 실제 상태 |
 | --- | --- | --- | --- |
-| 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | 로컬 Java 실행 검증, Docker 구성 추가 |
+| 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | CI #20의 실제 이미지·기동·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
 | Cloudflare Tunnel | 실행 중인 API를 HTTPS 주소로 연결 | 개발 기기 검증용 연결 수단 | 계정·도메인·터널 미구성, 템플릿만 작성 |
 | 운영 백엔드 호스트 | API·스케줄러 24시간 실행 | 상시 실행 Linux 서버 + Docker | VPS 업체·리전·요금 미선정, 서버 미생성 |
 | Supabase | 향후 PostgreSQL 영속 저장 | 운영 데이터 저장 목표 | 이 앱에 연결할 프로젝트 미확정, 스키마 초안 미적용 |
 | Firebase FCM | Android 원격 푸시 전달 | 시험 알림 전송 코드 구현 | 실제 자격 증명·기기 수신 미검증 |
-| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | 이전 CI #13 전체 작업 성공, 이번 접근 보호 변경의 CI는 별도 확인 필요 |
+| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | CI #17의 시험 APK 성공, CI #20의 Docker 작업 성공 |
 | Google Play | 앱 설치·업데이트 유통 | Android 정식 배포처 | 계정·앱 등록·심사 미진행 |
 | APK 직접 설치 | 소수 개발자의 기기 시험 | 정식 출시 전 내부 시험 | 독립 ARM64 시험 APK 빌드·서명 검사 완료 |
 
@@ -46,18 +46,24 @@ flowchart TD
 
 ## 로컬에서 시작하기
 
-소스 실행은 JDK 17·Maven, 앱 개발은 Node.js·npm과 Android SDK가 필요합니다. 컨테이너 실행은 Docker Compose가 설치된 PC에서 수행합니다.
+소스 실행은 JDK 17·Maven, 앱 개발은 Node.js·npm과 Android SDK가 필요합니다. 컨테이너 실행은 Docker Engine 28 이상과 `up --wait`를 지원하는 Docker Compose v2 이상이 설치된 PC에서 수행합니다.
 
 ```sh
 # 저장소 루트: 기존 파일을 덮어쓰지 않고 비공개 시험 키 생성
 python3 deploy/generate_api_tokens.py --output .env
 docker compose --env-file .env config --quiet
-docker compose --env-file .env up --build -d
+docker compose --env-file .env up --build --wait --wait-timeout 180
 curl http://127.0.0.1:8080/api/health
 docker compose down
 ```
 
 기본 구성은 호스트의 127.0.0.1:8080에만 포트를 엽니다. [배포 실행 안내](docs/deployment.md)에서 환경변수·실행·중지 절차를 확인하세요. 키를 설정하지 않으면 정확히 `GET /api/health` 외에는 503, 설정 후 키가 없거나 잘못되면 401, 호출 예산을 넘으면 429와 `Retry-After`를 반환합니다. localhost와 프록시 요청도 인증이 필요합니다. 세션 조회·취소에는 Bearer 키와 기존 `X-Session-Token`이 모두 필요합니다.
+
+별도 실행 검증은 POSIX 환경의 저장소 루트에서 다음 명령으로 수행합니다. 기존 `.env`나 기본 Compose 프로젝트·이미지 대신 임시 키·루프백 포트·고유 프로젝트·이미지를 사용하며, 검사 뒤 자신이 만든 프로젝트만 정리합니다. 실제 Docker 실행 결과와 검사 범위는 [Docker 검증 기록](docs/verification-docker.md)에 남깁니다.
+
+```sh
+python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
+```
 
 이 보호는 신뢰한 소수 시험 참가자를 위한 사전 공유 키이며 일반 사용자 로그인은 아닙니다. 앱에 공용 비밀을 내장하지 않습니다. **공개 Tunnel은 여전히 비활성 상태입니다.** 실제 HTTPS·자격 증명·기기 접속 검증과 운영 보안 조건이 갖춰진 뒤 별도로 연결해야 합니다.
 
@@ -88,7 +94,7 @@ npx expo run:android
 | 독립 시험 APK | CI의 Standalone Android test APK (ARM64, debug signed) 작업 | JS 내장·ARM64·Debug 키 서명·Artifact 14일 보관 |
 | 정식 출시 | 정식 업로드 키로 서명한 AAB → Play Console | 계정·Firebase 설정·스토어 자료·정책 심사·실기기 검증 필요 |
 
-CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하더라도 현재 Debug 키로 서명한 APK는 정식 출시 파일이 아닙니다. [이전 CI #13 검증 결과](https://github.com/yuilyoung/subway_alert/actions/runs/40520333343)는 전체 작업 성공의 과거 기록이며, 이번 접근 보호 변경의 검사 결과가 아닙니다.
+CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하더라도 현재 Debug 키로 서명한 APK는 정식 출시 파일이 아닙니다. [접근 보호 CI #17 검증 결과](https://github.com/yuilyoung/subway_alert/actions/runs/40525199870)에서 기존 3개 작업과 시험 APK 생성이 성공했습니다. 이 실행에는 새 Docker 작업이 포함되지 않았고, 실제 Android 설치·FCM 수신은 검증하지 않았습니다.
 
 ## 필요한 계정과 비밀 설정
 
@@ -108,11 +114,11 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 
 - [설계·아키텍처 v1.2](docs/architecture.md): 현재 구현과 목표, 개발 접근 보호와 운영 미완료 항목. 별도 PDF v1.1에는 이번 개정이 아직 반영되지 않았습니다.
 - [배포 실행 안내](docs/deployment.md), [서버 API와 FCM](server/README.md), [Android 앱](mobile/README.md), [Supabase 초안](supabase/README.md).
-- 앞선 검증: 서버 33개·모바일 21개 테스트 통과와 독립 ARM64 시험 APK 빌드·서명·JS 포함 검사 완료의 과거 기록. 이번 변경의 결과는 아래 검증 기록에 따로 남깁니다. 실제 기기 수신 미검증.
-- [이번 배포 구성의 검증 기록](docs/verification-deployment.md): Docker 실행·터널 연결·Play 게시까지 완료한 상태는 아닙니다.
+- 접근 보호 검증: 서버 52개·모바일 35개·Python 12개 테스트와 실행 JAR 인증·호출 제한 검사, CI #17의 독립 ARM64 시험 APK 생성 성공. 실제 기기 설치·FCM 수신은 미검증입니다.
+- [접근 보호·배포 구성 기록](docs/verification-deployment.md), [Docker 실행 검증 기록](docs/verification-docker.md): 로컬 가짜 응답 테스트와 실제 Docker CI를 구분하며, CI #20의 Docker 작업과 안전한 보고서 성공을 확인했습니다. Tunnel 연결·Play 게시 완료를 뜻하지 않습니다.
 
 호출 예산은 단일 프로세스 기준 전체 600회/분, 기기 키별 60회/분, 세션 생성 키별 3회/분입니다. 직접 열차 조회는 모든 키 합계 6회/분·서울 날짜 하루 240회이고 시험 감시 공유 폴링의 하루 600회와 별도여서 sample 모드에서 합계 최대 840회/일입니다. 재시작·복제하면 예산이 초기화·증가하므로 운영 과금 제어는 아닙니다.
 
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
 
-다음 순서는 접근 보호 통합 검증 → 개발 PC의 Docker 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.
+다음 순서는 개발 PC Docker 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.

@@ -4,7 +4,7 @@
 
 | 항목 | 이번 개발 기준 | 실제 상태 |
 | --- | --- | --- |
-| 개발 백엔드 | 개발자 PC의 Docker Compose에서 Spring Boot 실행 | 설정 파일 작성, 컨테이너 실행 미검증 |
+| 개발 백엔드 | 개발자 PC의 Docker Compose에서 Spring Boot 실행 | CI #20의 이미지·컨테이너·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
 | 개발 HTTPS 진입점 | 같은 PC의 Cloudflare named Tunnel | 비활성 예제만 작성, 계정·도메인·터널 미생성 |
 | 베타·운영 백엔드 | 상시 실행 Linux 서버에서 같은 Docker 이미지 실행 | 서버 업체·요금·지역 미선정, 실제 배포 없음 |
 | 데이터베이스 | Supabase PostgreSQL 계획 | 스키마 초안, 앱·서버 미연동 |
@@ -18,15 +18,14 @@ Android 앱은 웹앱처럼 Cloudflare에 올려 실행하는 것이 아닙니�
 
 ## 로컬 백엔드 실행
 
-Docker Engine 28 이상과 Docker Compose 플러그인(v2 이상)을 준비합니다. 오래된 Docker에는 localhost 게시 포트가 같은 네트워크에서 접근될 수 있는 제약이 있으므로 최신 엔진을 사용합니다. 명령은 저장소 루트에서 실행합니다.
+Docker Engine 28 이상과 `up --wait`를 지원하는 Docker Compose 플러그인(v2 이상)을 준비합니다. 오래된 Docker에는 localhost 게시 포트가 같은 네트워크에서 접근될 수 있는 제약이 있으므로 최신 엔진을 사용합니다. 명령은 저장소 루트에서 실행합니다.
 
 ```sh
 python3 deploy/generate_api_tokens.py --output .env
 docker compose --env-file .env config --quiet
-docker compose --env-file .env up --build -d backend
+docker compose --env-file .env up --build --wait --wait-timeout 180 backend
 docker compose ps
 curl --fail http://127.0.0.1:8080/api/health
-docker compose logs --tail=100 backend
 docker compose down
 ```
 
@@ -37,6 +36,20 @@ Python 3 생성 도구는 기본 키 1개, `--count 2`처럼 1~20개의 참가�
 Dockerfile은 Maven에서 테스트와 패키징을 수행한 뒤 JRE 이미지에서 UID 10001의 일반 사용자로 실행합니다. 런타임 파일 시스템은 읽기 전용이고 임시 파일은 제한된 `/tmp`를 사용합니다. 현재 이미지 태그는 주요 런타임 버전을 지정한 태그이며 불변 digest로 고정되지는 않았습니다. 운영 릴리스 전에 실제 빌드 검증과 함께 승인한 이미지 digest 및 취약점 검사를 기록해야 합니다.
 
 로컬 Compose는 공개 `sample` 키만 사용하고 FCM을 끕니다. Firebase 서비스 계정 키나 실제 서울 API 키를 이미지, Git, 앱 또는 `.env.example`에 넣지 않습니다. FCM 시험은 [서버 설정](../server/README.md)의 운영자 설정을 별도로 준비한 뒤 비밀 저장소나 읽기 전용 자격 증명 마운트를 사용하도록 확장해야 합니다. 현재 Compose에 해당 설정은 자동 포함되지 않습니다.
+
+## 독립 Docker 실행 검사
+
+실행 검증은 위의 개발용 `.env`를 만들거나 기본 프로젝트를 시작하지 않고도 수행할 수 있습니다. 같은 Docker 요구 사항과 Python 3·POSIX 환경에서 저장소 루트의 다음 명령을 사용합니다.
+
+```sh
+python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
+```
+
+검사기는 저장소 Dockerfile을 고유 이미지 태그로 빌드하고, 고유 Compose 프로젝트·임시 키·비어 있는 IPv4 루프백 포트를 사용합니다. 기존 `.env`, 개발 컨테이너와 기본 `subway-alert-backend:local` 태그는 변경하지 않습니다. 시작 시 Compose의 `--wait`와 실제 healthcheck를 기다립니다.
+
+키 미설정 상태의 health 200·보호 API 503, 키 적용 뒤 누락·오류·중복 헤더 401·정상 요청 200·생성/버스트 제한 429를 확인합니다. 이미지 healthcheck, 런타임 UID 10001, read-only rootfs, `cap_drop: ALL`, `no-new-privileges`, `/tmp` tmpfs, `127.0.0.1` 포트 게시, sample·FCM 비활성 구성도 검사합니다. 재시작 후 health와 인증이 돌아오는지 확인하되 메모리 세션·호출 예산의 영속성을 보장하지 않습니다. 서울 API나 FCM은 호출하지 않습니다.
+
+성공·실패 모두 검사 프로젝트만 `down`하며 정리 실패를 성공으로 처리하지 않습니다. JSON 보고서는 비밀 없는 판정만 담습니다. 키·환경변수·전체 inspect/config·컨테이너 로그는 공개 출력이나 보고서에 넣지 않습니다. Docker가 없거나 빌드·시작·검사에 실패하면 건너뛰지 않고 실패합니다. CI의 별도 Docker 작업도 같은 명령을 실행하며 보고서는 Artifact로 14일 보관합니다. 최신 결과는 [Docker 검증 기록](verification-docker.md)을 확인하세요.
 
 ## 개발 기기 접근 키와 호출 예산
 
@@ -74,12 +87,15 @@ cloudflared tunnel --config deploy/cloudflared/config.disabled.example.yml ingre
 
 ## 검증 범위와 남은 일
 
-현재 작업 환경에는 Docker/Podman 엔진과 cloudflared가 없습니다. 공식 배포본의 SHA-256을 확인한 standalone Docker Compose v5.6.1로 `config --quiet`를 실행해 구문과 환경변수 치환을 검증했습니다. 해석된 구성의 게시 주소 `127.0.0.1:8080`, 공개 샘플 고정, FCM 비활성화도 확인했습니다. 비활성 ingress와 YAML 파싱은 별도로 정적 확인했습니다. 이미지 빌드, 컨테이너 healthcheck, 종료·재시작, 실제 Tunnel 연결은 수행하지 않았습니다. 서버와 앱의 테스트 성공만으로 이 배포 구성이 실행됐다고 보지 않습니다.
+현재 작업 환경에는 Docker/Podman 엔진과 cloudflared가 없습니다. 앞선 접근 보호 변경은 Compose 구성 해석과 실행 JAR 인증 검사를 거쳐 [CI #17](https://github.com/yuilyoung/subway_alert/actions/runs/40525199870)의 3개 작업·시험 APK 생성까지 성공했습니다. 이 실행에는 새 Docker 작업이 없으므로 이미지·컨테이너 검증의 증거로 사용하지 않습니다.
 
-이번 접근 보호 변경의 애플리케이션·생성 도구·Compose 검증은 [검증 기록](verification-deployment.md)에 이전 기록과 구분해 남깁니다. 다음 배포 검증은 Docker가 있는 개발 PC에서 위 명령을 실행해 healthcheck와 보호 API 거부를 확인하는 것입니다. 그다음 Firebase 설정을 포함해 앱을 다시 빌드하고, 인증된 HTTPS 개발 경로에서 TEST 알림을 실기기로 검증해야 합니다. 실제 하차 알림은 서울 실키 HTTPS·경로·시간대·운행 예외를 확인하기 전까지 차단 상태로 유지합니다. 운영 전에는 영속 DB·재시작 복구·모니터링·사용자 인증·분산 쿼터·전송 재시도/멱등성·권한 정리가 추가로 필요합니다.
+이번 Docker 검사기의 로컬 테스트는 가짜 Docker 응답으로 실패 경로와 판정을 검증하고, 실제 이미지 빌드·healthcheck·재시작·정리는 GitHub Actions의 별도 Docker 작업으로 검증합니다. 실행 결과는 [Docker 검증 기록](verification-docker.md)에 구분해서 남깁니다. [CI #20의 Docker 작업](https://github.com/yuilyoung/subway_alert/actions/runs/40530621386/job/122282085504)은 실제 이미지 빌드·기동·인증·호출 제한·재시작·정리를 통과했습니다. 이전 애플리케이션·키 생성·Compose 정적 검증은 [접근 보호 검증 기록](verification-deployment.md)에 있습니다.
+
+Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하고, 인증된 HTTPS 개발 경로에서 TEST 알림을 실기기로 검증해야 합니다. 실제 하차 알림은 서울 실키 HTTPS·경로·시간대·운행 예외를 확인하기 전까지 차단 상태로 유지합니다. 운영 전에는 영속 DB·재시작 복구·모니터링·사용자 인증·분산 쿼터·전송 재시도/멱등성·권한 정리가 추가로 필요합니다. 이번 작업은 Tunnel·Firebase·VPS·DB·Play 자원을 생성하지 않습니다.
 
 ## 공식 참고
 
+- [Docker Compose up과 --wait](https://docs.docker.com/reference/cli/docker/compose/up/)
 - [Docker Compose 서비스와 포트](https://docs.docker.com/reference/compose-file/services/)
 - [Docker 포트 게시와 localhost](https://docs.docker.com/engine/network/port-publishing/)
 - [Dockerfile USER와 HEALTHCHECK](https://docs.docker.com/reference/dockerfile/)
