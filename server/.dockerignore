@@ -1,0 +1,10 @@
+# Only Maven source inputs enter the build context.
+**
+!pom.xml
+!src/
+!src/**
+src/**/google-services.json
+src/**/*service-account*.json
+src/**/*credentials*.json
+src/**/*.pem
+src/**/*.key
