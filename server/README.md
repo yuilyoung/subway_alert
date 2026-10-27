@@ -2,7 +2,7 @@
 
 Spring Boot 3 / Java 17. PDF의 Java 21과 달리 현재 개발 환경에서 사용할 수 있는 Java 17을 사용한다. Maven이 설치된 환경에서 `mvn -f server/pom.xml test` 및 `mvn -f server/pom.xml spring-boot:run`으로 실행한다. 기본 바인딩은 `127.0.0.1:8080`이다.
 
-이 서버는 **실제 위치 추적이나 알림 서버가 아니다.** 서울 API의 공개 샘플 조회 기능은 있지만 실키 HTTPS 통신은 검증되지 않았다. 시험용 샘플 폴링과 FCM 발송 경로는 구현됐으나 실제 자격 증명과 기기로 검증되지 않았다. Supabase/Postgres, 지속 저장 및 사용자 계정은 연동되지 않았다. 재시작 시 모든 세션이 사라진다. 2호선의 강남·역삼·선릉·삼성 네 역과 UP/DOWN 방향은 프로그램 검증용 샘플이며 순환선 전체, 환승, 급행, 실제 운행 방향을 나타내지 않는다. 실기기 앱과 서버의 엔드투엔드 연결도 확인되지 않았다.
+이 서버는 **실제 위치 추적이나 알림 서버가 아니다.** 서울 API의 공개 샘플 조회 기능은 있지만 실키 HTTPS 통신은 검증되지 않았다. 시험용 샘플 폴링과 FCM 발송 경로는 구현됐으나 실제 자격 증명과 기기로 검증되지 않았다. 기본 `MONITOR_STORE=memory`에서는 재시작 시 세션이 사라진다. 선택형 로컬 PostgreSQL 저장은 TEST 감시의 등록·취소·전송 상태와 원래 만료시각만 보존하며 감시를 자동 재개하지 않는다. 실제 Supabase 클라우드와 사용자 계정은 연동되지 않았다. 독립 모의 `/api/track` 엔진은 계속 메모리만 사용한다. 2호선의 강남·역삼·선릉·삼성 네 역과 UP/DOWN 방향은 프로그램 검증용 샘플이며 순환선 전체, 환승, 급행, 실제 운행 방향을 나타내지 않는다. 실기기 앱과 서버의 엔드투엔드 연결도 확인되지 않았다.
 
 서울 열린데이터광장 [실시간 열차 위치 API](https://data.seoul.go.kr/dataList/datasetView.do?infId=OA-12601&serviceKind=1&srvType=A)는 인증키가 필요하다. 공식 예시에는 평문 HTTP가 기재돼 있다. 공개 샘플키만 HTTP로 보내며 실제 발급 키는 HTTPS로만 전송하도록 구현했다. 이 개발 환경에서는 HTTPS 연결이 검증되지 않아 실제 키 연동은 미검증이다. 실제 연동 시 TLS 및 데이터 시각·시간대·방향·열차 식별을 실측으로 검증해야 한다. 열차번호 선택만으로 사용자의 탑승 여부가 증명되지는 않는다.
 
@@ -22,7 +22,7 @@ Spring Boot 3 / Java 17. PDF의 Java 21과 달리 현재 개발 환경에서 사
 
 분 한도는 token bucket으로 연속 보충하고 한도 초과는 429와 양의 정수 초 단위 `Retry-After`를 반환합니다. 인증 전 한도는 잘못된 키 요청에도 적용합니다. 모든 키의 직접 조회 240회와 감시 폴링 600회를 합쳐 최대 840회/일/프로세스입니다. 동시 요청에도 한도 초과 허용을 막지만 메모리 상태이므로 재시작·인스턴스 복제에 따른 초기화·증가는 막지 못합니다. 운영 과금 제어를 대신하지 않습니다.
 
-이 키는 신뢰한 시험 참가자 접근용이며 일반 사용자 인증이나 FCM 토큰 소유 증명이 아닙니다. APK에 공용 키를 넣지 않습니다. 유출·회수 시 서버의 허용 목록에서 제거하고 서버를 재시작하며, 앱이 기존 감시를 취소하지 못하면 최대 2시간 만료를 안내해야 합니다. 일반 사용자 로그인·영속/분산 쿼터·JSON 크기·동시 작업 제한·에지 DDoS 방어·영속 멱등 등록·복구는 운영 전 과제입니다. 공개 Tunnel은 여전히 비활성 상태입니다.
+이 키는 신뢰한 시험 참가자 접근용이며 일반 사용자 인증이나 FCM 토큰 소유 증명이 아닙니다. APK에 공용 키를 넣지 않습니다. 유출·회수 시 서버의 허용 목록에서 제거하고 서버를 재시작하며, 앱이 기존 감시를 취소하지 못하면 최대 2시간 만료를 안내해야 합니다. 일반 사용자 로그인·영속/분산 쿼터·JSON 크기·동시 작업 제한·에지 DDoS 방어는 운영 전 과제입니다. 선택형 로컬 PostgreSQL의 TEST 등록·취소 복구는 구현됐지만, 운영 DB·백업 복구 검증과 분산 감시는 별도 과제입니다. 공개 Tunnel은 여전히 비활성 상태입니다.
 
 ## 모의 API
 
@@ -48,11 +48,15 @@ Spring Boot 3 / Java 17. PDF의 Java 21과 달리 현재 개발 환경에서 사
 - `POST /api/monitor-sessions`: Bearer 외에 앱이 미리 만든 `Idempotency-Key`(소문자 UUID v4)와 `X-Session-Token`(32바이트 난수의 소문자 hex 64자)이 필수입니다. JSON은 `lineId` (`2`), `trainId` (문자열), `direction` (`INNER` 또는 `OUTER`), `previousStation`, `destinationStation`, `fcmToken`, `mode` (`TEST`)입니다. 응답 `id`는 요청 UUID, `sessionToken`은 클라이언트 비밀이며 `status`, `mode`, `expiresAt`을 함께 반환합니다.
 - `GET /api/monitor-sessions/{id}`, `DELETE /api/monitor-sessions/{id}`: `X-Session-Token` 헤더로 소유 세션만 조회·취소합니다. 조회 응답에 토큰은 없습니다.
 - `POST /api/monitor-sessions/{id}/test`: 위 헤더로 명시적 시험 알림을 보냅니다. 세션당 30초, 프로세스 전체 분당 30회로 제한하며 자동 매칭과 별도입니다.
-- 세션 `status`는 `TRACKING`, `SAMPLE_MATCHED`, `CANCELLED`, `EXPIRED`입니다. 샘플 매칭 후 해당 세션의 폴링은 중지됩니다. `deliveryStatus`는 `NONE`, `SENDING`, `FCM_ACCEPTED`, `UNAVAILABLE`, `FAILED`이며 전송 실패를 자동 재시도하지 않습니다. `FCM_ACCEPTED`는 Firebase의 요청 수락만 뜻하며 기기 도착·표시를 보장하지 않습니다.
+- 세션 `status`는 `TRACKING`, `SAMPLE_MATCHED`, `CANCELLED`, `EXPIRED`입니다. 샘플 매칭 후 해당 세션의 폴링은 중지됩니다. `deliveryStatus`는 `NONE`, `SENDING`, `UNKNOWN`, `FCM_ACCEPTED`, `UNAVAILABLE`, `FAILED`이며 전송 실패를 자동 재시도하지 않습니다. `UNKNOWN`은 PostgreSQL에 `SENDING`으로 남은 전송의 결과를 서버 재시작 후 알 수 없다는 뜻이며 자동 재전송하지 않습니다. `FCM_ACCEPTED`는 Firebase의 요청 수락만 뜻하며 기기 도착·표시를 보장하지 않습니다.
 - 같은 ID·세션 비밀·정규화한 본문은 같은 세션의 현재 결과를 반환하고 만료시각을 연장하거나 감시를 다시 켜지 않습니다. 다른 비밀·본문은 409, 형식 오류는 400입니다. 서버는 비밀과 요청의 해시를 보관하며 재생용 원문 세션 비밀을 저장하지 않습니다.
-- 앱은 ID와 비밀을 먼저 저장하므로 최초 응답을 잃어도 기존 GET/DELETE로 조회·종료할 수 있습니다. 등록보다 DELETE가 먼저 도착하면 CANCELLED 표식을 만들어 늦은 등록을 막습니다. 표식도 500개 한도와 2시간 만료·추가 1시간 보관에 포함됩니다. 서버 재시작·보관 만료·여러 인스턴스 사이의 중복 방지는 아직 보장하지 않습니다. [등록 복구 계약](../docs/registration-recovery.md)을 확인하세요.
+- 앱은 ID와 비밀을 먼저 저장하므로 최초 응답을 잃어도 기존 GET/DELETE로 조회·종료할 수 있습니다. 등록보다 DELETE가 먼저 도착하면 CANCELLED 표식을 만들어 늦은 등록을 막습니다. 표식도 500개 한도와 2시간 만료·추가 1시간 보관에 포함됩니다. 기본 memory 모드의 중복 억제 기록은 재시작 시 사라지고, postgres 모드는 원래 보관 기한까지 재시작 후에도 유지합니다. 보관 기한이 지나 삭제된 기록과 서로 다른 DB를 쓰는 여러 인스턴스 사이의 중복은 막지 않습니다. 같은 DB에서는 단일 연결의 advisory lock으로 두 번째 백엔드 시작을 거부하며 분산 감시를 제공하지 않습니다. [등록 복구 계약](../docs/registration-recovery.md)을 확인하세요.
 
-스케줄러는 활성 TEST 세션이 있을 때만 서울시 공개 `sample`을 공유해 기본 120초 간격으로 조회하고, 이 프로세스 기준 서울 날짜 하루에 최대 600회 요청합니다. 한 폴링당 전송 시도는 최대 10건입니다. `/api/live/trains`의 별도 하루 240회 한도와 sample 모드에서 합계 최대 840회입니다. 한도는 프로세스 메모리에만 존재해 재시작하면 초기화됩니다. 다중 인스턴스·장애 재시작을 포함한 운영 쿼터 제어는 아닙니다. 기본 memory 모드에서는 세션 기록이 재시작 시 사라집니다. 선택형 `MONITOR_STORE=postgres`는 등록·취소 기록과 원래 만료시각을 보존하고, 진행 중 감시는 재시작 시 종료합니다. FCM 토큰·역·원문 비밀은 DB에 저장하지 않으며 자동 재개·재전송하지 않습니다. 설정·단일 백엔드 제한·장애 후 503·복구 절차는 [PostgreSQL 안내](../docs/durable-receipts.md)를 따릅니다.
+스케줄러는 활성 TEST 세션이 있을 때만 서울시 공개 `sample`을 공유해 기본 120초 간격으로 조회하고, 이 프로세스 기준 서울 날짜 하루에 최대 600회 요청합니다. 한 폴링당 전송 시도는 최대 10건입니다. `/api/live/trains`의 별도 하루 240회 한도와 sample 모드에서 합계 최대 840회입니다. 한도는 프로세스 메모리에만 존재해 재시작하면 초기화됩니다. 다중 인스턴스·장애 재시작을 포함한 운영 쿼터 제어는 아닙니다.
+
+기본 memory 모드에서는 세션 기록이 재시작 시 사라집니다. 선택형 `MONITOR_STORE=postgres`는 `MONITOR_DB_URL`, `MONITOR_DB_USER`, `MONITOR_DB_PASSWORD`를 모두 필요로 하며 오설정·연결 실패 시 memory로 대체하지 않고 시작에 실패합니다. 등록·취소 기록과 원래 만료시각을 보존하되, 재시작 시 `TRACKING`은 `CANCELLED`(이미 만료했으면 `EXPIRED`), `SENDING`은 `UNKNOWN`으로 바꿉니다. 최대 500개와 원래 2시간 만료·추가 1시간 보관 정책을 유지하며 재시도·재시작으로 기한을 연장하지 않습니다. FCM 토큰·역·원문 비밀은 DB에 저장하지 않으며 감시를 자동 재개하거나 전송을 자동 재시도하지 않습니다. 실행 중 저장 장애를 관측하면 감시 API는 계속 503을 반환하고 이후 폴링·전송을 시작하지 않으며 DB 복구 후 백엔드 재시작이 필요합니다.
+
+`/api/health`는 저장 준비 상태를 뜻하지 않습니다. direct 또는 session 연결만 지원하며 transaction pooler는 지원하지 않습니다. 설정·단일 백엔드 제한·장애 후 503·복구 절차는 [PostgreSQL 안내](../docs/durable-receipts.md)를 따릅니다.
 
 FCM 사용을 위해 `FCM_ENABLED=true`, `FIREBASE_PROJECT_ID`, 서버 ADC 자격 증명을 설정해야 합니다. 예를 들어 서비스 계정의 비밀 JSON을 서버에 안전하게 저장하고 `GOOGLE_APPLICATION_CREDENTIALS`에 파일 경로만 지정할 수 있습니다. 앱에 필요한 `google-services.json`은 별개이며 비밀 서비스 계정 키를 앱이나 저장소에 넣지 마세요. 설정이 없거나 초기화가 실패하면 시험 요청은 `UNAVAILABLE`로 표시합니다. 이 개발 환경에서는 실제 Firebase 프로젝트·기기 자격 증명이 없어 FCM 발송·기기 수신을 검증하지 않았습니다.
 

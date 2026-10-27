@@ -20,7 +20,7 @@
 
 ## 원격 CI에서 실행하는 실제 PostgreSQL 검사
 
-워크플로의 `Real PostgreSQL durable receipt integration`은 새 PostgreSQL 17 서비스와 새 `subway_alert_test` DB에서 패키징 JAR을 여러 번 실행합니다. 이 파일 작성 시점에는 원격 실행 전이며, **해당 브랜치 최신 커밋의 PR / Actions 결과가 실제 원격 판정**입니다. 새 CI 결과는 PR 본문에서 실행 링크와 함께 갱신합니다.
+실제 [CI #32의 PostgreSQL 작업](https://github.com/yuilyoung/subway_alert/actions/runs/40544016480/job/122329638677)이 성공했습니다. 검증 커밋은 `00d25b1a2b09971a59f61cefc35d30d1c9fad1d2`입니다. 새 PostgreSQL 17 서비스와 새 `subway_alert_test` DB에서 Maven 85개와 패키징 JAR의 아래 검사를 실제 실행했습니다. 먼저 실행한 CI #30에서도 같은 통합 검사가 성공했습니다. 이 기록 이후 문서만 수정한 커밋이 있을 수 있으며, 최신 커밋 전체 CI·APK 결과는 PR 본문과 Actions에서 확인합니다.
 
 - 등록·취소·취소 선행 표식의 재시작 복구, 같은 ID·원래 만료·현재 종료 상태 유지.
 - 잘못된 capability의 404/409, 복원한 종료 감시의 시험 전송 거부.
