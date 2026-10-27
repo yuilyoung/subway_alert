@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+android/
+ios/
+dist/
+build/
+target/
+*.log
+*.class
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.DS_Store

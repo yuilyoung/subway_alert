@@ -1,0 +1,7 @@
+{
+  "expo": {
+    "name": "지하철 하차 알림", "slug": "subway-alert", "version": "0.1.0", "orientation": "portrait",
+    "android": {"package": "com.yuilyoung.subwayalert", "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION", "POST_NOTIFICATIONS", "VIBRATE"]},
+    "plugins": [["expo-location", {"locationWhenInUsePermission": "선택한 경로의 역 근처를 감지하기 위해 위치를 사용합니다.", "locationAlwaysAndWhenInUsePermission": "화면이 꺼져도 역 근처를 감지하기 위해 백그라운드 위치를 사용합니다.", "isAndroidBackgroundLocationEnabled": true, "isAndroidForegroundServiceEnabled": true}], "expo-notifications"]
+  }
+}
