@@ -8,7 +8,7 @@ const {monitorRequest,validateSelection,needsRegistration}=require('./monitorApi
 const {sessionAccessToken}=require('./connectionStore');
 const {createRegistrationFlow}=require('./registrationFlow');
 const statusLabels={TRACKING:'시험 감시 중',SAMPLE_MATCHED:'공개 샘플 조건 일치 · 실제 하차 아님',CANCELLED:'종료됨',EXPIRED:'만료됨'};
-const delivery={NONE:'아직 전송 요청 없음',SENDING:'시험 알림 전송 중',FCM_ACCEPTED:'FCM 서버가 전송 요청을 수락함 · 기기 수신은 미확인',UNAVAILABLE:'FCM 서버 설정이 없어 전송할 수 없음',FAILED:'시험 알림 전송 실패'};
+const delivery={NONE:'아직 전송 요청 없음',SENDING:'시험 알림 전송 중',UNKNOWN:'서버 재시작으로 이전 전송 결과를 알 수 없음 · 자동 재전송하지 않음',FCM_ACCEPTED:'FCM 서버가 전송 요청을 수락함 · 기기 수신은 미확인',UNAVAILABLE:'FCM 서버 설정이 없어 전송할 수 없음',FAILED:'시험 알림 전송 실패'};
 const polling={NOT_POLLED:'아직 열차 조회 전',SAMPLE_PARTIAL:'공개 샘플 일부를 조회 중',SOURCE_BLOCKED:'해당 데이터 소스는 차단됨',PROVIDER_ERROR:'열차 API 조회 오류',DAILY_LIMIT:'API 조회 한도에 도달함'};
 async function deviceToken(){
  if(Platform.OS!=='android')throw new Error('Android 기기에서만 FCM 시험을 지원합니다.');

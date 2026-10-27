@@ -72,6 +72,37 @@ class RuntimePolicyTests(unittest.TestCase):
 
 
 class SharedHttpSmokeTests(unittest.TestCase):
+    def test_packaged_auth_smoke_always_uses_isolated_memory_test_runtime(self):
+        hostile = {
+            'PATH': '/fixture/bin', 'JAVA_HOME': '/fixture/jdk', 'LANG': 'C.UTF-8',
+            'MONITOR_STORE': 'postgres', 'MONITOR_DB_URL': 'jdbc:postgresql://live/production',
+            'MONITOR_DB_USER': 'live-user', 'MONITOR_DB_PASSWORD': 'live-password',
+            'FCM_ENABLED': 'true', 'SEOUL_SUBWAY_KEY': 'live-provider-key',
+            'SPRING_APPLICATION_JSON': '{"MONITOR_STORE":"postgres","FCM_ENABLED":true}',
+            'SPRING_CONFIG_LOCATION': 'https://live/config.properties',
+            'SPRING_CONFIG_IMPORT': 'https://live/extra.properties',
+            'SPRING_PROFILES_ACTIVE': 'production',
+            'JAVA_TOOL_OPTIONS': '-DFCM_ENABLED=true', 'JDK_JAVA_OPTIONS': '-DMONITOR_STORE=postgres',
+            '_JAVA_OPTIONS': '-Dserver.address=0.0.0.0',
+            'FIREBASE_CREDENTIALS': '/live/credential.json', 'UNRELATED_PRIVATE_SETTING': 'live-secret',
+        }
+        with patch.dict(os.environ, hostile, clear=True),              patch.object(api_smoke.subprocess, 'Popen') as popen,              patch.object(api_smoke, 'request', return_value=(200, {}, b'{}')):
+            popen.return_value.poll.return_value = None
+            with api_smoke.server(Path('fixture.jar'), 'fixture-api-token'):
+                pass
+        launched = popen.call_args.kwargs['env']
+        self.assertEqual(launched['MONITOR_STORE'], 'memory',
+                         'authentication smoke must never bootstrap an ambient database')
+        self.assertFalse(any(name.startswith(('SPRING_', 'MONITOR_DB_')) for name in launched))
+        self.assertTrue(all(name not in launched for name in (
+            'JAVA_TOOL_OPTIONS', 'JDK_JAVA_OPTIONS', '_JAVA_OPTIONS',
+            'FIREBASE_CREDENTIALS', 'UNRELATED_PRIVATE_SETTING')))
+        self.assertEqual(launched['PATH'], hostile['PATH'])
+        self.assertEqual(launched['JAVA_HOME'], hostile['JAVA_HOME'])
+        self.assertEqual(launched['FCM_ENABLED'], 'false')
+        self.assertEqual(launched['SEOUL_SUBWAY_KEY'], 'sample')
+        self.assertEqual(launched['SERVER_ADDRESS'], '127.0.0.1')
+
     def test_registration_check_rejects_a_server_without_cancel_before_create(self):
         self.assertTrue(callable(getattr(api_smoke, 'check_registration_recovery', None)),
                         'packaged server must verify the registration recovery contract')

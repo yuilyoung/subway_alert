@@ -35,6 +35,9 @@ public final class MonitorController {
     try{return service.test(id,secret);}catch(MonitorService.NotFound e){throw notFound();}
     catch(MonitorService.Conflict e){throw new ResponseStatusException(HttpStatus.CONFLICT,"Session inactive or test rate limited");}
   }
+  @ExceptionHandler(MonitorService.Unavailable.class)
+  @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+  public java.util.Map<String,String> storageUnavailable(){return java.util.Map.of("error","Monitor storage unavailable");}
   private static String singleHeader(HttpServletRequest request,String name){
     var values=Collections.list(request.getHeaders(name));
     if(values.size()!=1)throw new IllegalArgumentException("Invalid registration headers");

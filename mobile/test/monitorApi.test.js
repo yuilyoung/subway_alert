@@ -36,6 +36,11 @@ test('test result preserves only recognized delivery and polling states',async()
  assert.equal(out.deliveryStatus,'FCM_ACCEPTED');assert.equal(out.pollStatus,'SAMPLE_PARTIAL');
  await assert.rejects(()=>monitorRequest('https://example.com',sess,'status',false,async()=>reply({id:ID,mode:'TEST',expiresAt:'2026-10-27T02:00:00Z',status:'TRACKING',deliveryStatus:'SECRET',pollStatus:'SAMPLE_PARTIAL'})));
 });
+test('restored cancelled monitor preserves unknown delivery result after restart',async()=>{
+ const session={...identity,server:'https://example.com',accessToken:KEY};
+ const result=await monitorRequest(session.server,session,'status',false,async()=>reply({id:ID,mode:'TEST',expiresAt:'2026-10-27T02:00:00Z',status:'CANCELLED',deliveryStatus:'UNKNOWN',pollStatus:'NOT_POLLED'}));
+ assert.deepEqual(result,{status:'CANCELLED',mode:'TEST',expiresAt:'2026-10-27T02:00:00Z',deliveryStatus:'UNKNOWN',pollStatus:'NOT_POLLED'});
+});
 test('Firebase configuration is opt-in at build time',()=>{
  const config=require('../app.config');const original=process.env.GOOGLE_SERVICES_JSON;
  try {delete process.env.GOOGLE_SERVICES_JSON;assert.equal(config({config:{android:{package:'com.yuilyoung.subwayalert'}}}).android.googleServicesFile,undefined);

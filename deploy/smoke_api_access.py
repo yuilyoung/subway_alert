@@ -41,13 +41,22 @@ def request(port, path, token=None, method='GET', body=None, duplicate=False,
         connection.close()
 
 
+def isolated_java_environment():
+    """Keep only OS/JDK essentials; ambient app/JVM config can change safety modes."""
+    allowed = ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ',
+               'TMPDIR', 'TMP', 'TEMP', 'SYSTEMROOT', 'WINDIR')
+    return {name: os.environ[name] for name in allowed if name in os.environ}
+
+
 @contextmanager
 def server(jar, token):
     with socket.socket() as port_socket:
         port_socket.bind(('127.0.0.1', 0))
         port = port_socket.getsockname()[1]
-    environment = dict(os.environ, SERVER_ADDRESS='127.0.0.1', PORT=str(port),
-                       SUBWAY_API_TOKENS=token, FCM_ENABLED='false', SEOUL_SUBWAY_KEY='sample')
+    environment = isolated_java_environment()
+    environment.update(SERVER_ADDRESS='127.0.0.1', PORT=str(port), MONITOR_STORE='memory',
+                       SUBWAY_API_TOKENS=token, FCM_ENABLED='false', SEOUL_SUBWAY_KEY='sample',
+                       MONITOR_POLL_INTERVAL_MS='3600000')
     # Capture logs without echoing environment or credential material on failures.
     with tempfile.TemporaryFile() as log:
         process = subprocess.Popen(['java', '-jar', str(jar)], env=environment,

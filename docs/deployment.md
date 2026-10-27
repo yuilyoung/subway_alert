@@ -7,7 +7,7 @@
 | 개발 백엔드 | 개발자 PC의 Docker Compose에서 Spring Boot 실행 | CI #20의 이미지·컨테이너·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
 | 개발 HTTPS 진입점 | 같은 PC의 Cloudflare named Tunnel | 비활성 예제만 작성, 계정·도메인·터널 미생성 |
 | 베타·운영 백엔드 | 상시 실행 Linux 서버에서 같은 Docker 이미지 실행 | 서버 업체·요금·지역 미선정, 실제 배포 없음 |
-| 데이터베이스 | Supabase PostgreSQL 계획 | 스키마 초안, 앱·서버 미연동 |
+| 데이터베이스 | 선택형 로컬 PostgreSQL / 운영 Supabase 목표 | TEST 기록 JDBC 저장, Supabase 프로젝트 미확정·미연결 |
 | 알림 | Firebase Cloud Messaging | TEST 전송 코드, 실제 자격 증명·기기 수신 미검증 |
 | Android 빌드 | Expo/Gradle로 APK 또는 AAB 생성 | 테스트 APK만 생성·검증 |
 | Android 정식 배포 | Google Play Console/Play 스토어 | 계정·서명·테스트 트랙·심사·출시 미완료 |
@@ -63,11 +63,11 @@ python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
 | 직접 열차 조회 | 모든 키 합계 6회/분, 서울 날짜 하루 240회 |
 | TEST 감시 공유 폴링 | 별도 서울 날짜 하루 600회 |
 
-분 한도는 token bucket으로 연속 보충됩니다. 요청 예산 초과는 429와 양의 정수 초 단위 `Retry-After`를 반환합니다. 직접 조회와 감시 폴링은 별도 예산이므로 외부 서울 API 요청은 sample 모드에서 합계 최대 840회/일/프로세스입니다. 예산과 세션은 메모리에만 있고 서버 재시작 시 초기화됩니다. 인스턴스를 늘리면 예산도 늘어나므로 운영 과금 상한이나 분산 쿼터가 아닙니다.
+분 한도는 token bucket으로 연속 보충됩니다. 요청 예산 초과는 429와 양의 정수 초 단위 `Retry-After`를 반환합니다. 직접 조회와 감시 폴링은 별도 예산이므로 외부 서울 API 요청은 sample 모드에서 합계 최대 840회/일/프로세스입니다. 예산은 메모리에 있어 서버 재시작 시 초기화됩니다. 세션 기록은 기본 메모리 모드에서 사라지고 선택형 PostgreSQL 모드에서는 종료 상태로 복원됩니다. 인스턴스를 늘리면 예산도 늘어나므로 운영 과금 상한이나 분산 쿼터가 아닙니다.
 
 앱의 연결 화면에서 HTTPS origin과 전달받은 API 키를 입력·저장합니다. 키는 SecureStore에 보관하며 origin 변경 시 키를 비우고 이전 응답을 무효화합니다. 감시에는 등록 당시 origin·API 키·세션 토큰을 함께 저장해 주소가 바뀌어도 기존 비밀을 새 주소에 보내지 않습니다. 취소가 확인되기 전에는 기존 기록을 지우지 않습니다. Metro의 루프백·에뮬레이터 HTTP 개발 예외는 [모바일 안내](../mobile/README.md)에 한정합니다.
 
-이 키는 신뢰한 개발 기기의 접근 수단이며 일반 사용자 로그인이나 FCM 기기 소유 증명이 아닙니다. 공용 키를 APK에 내장하지 않습니다. 회수할 키를 서버 목록에서 제거한 뒤 `docker compose --env-file .env up -d --force-recreate backend`로 새 환경을 적용합니다. 키 파일은 0600 권한을 유지하고, 유출 키는 새로 생성해 교체합니다. 회수 후 기존 감시 취소가 실패할 수 있으며 서버 세션은 최대 2시간 후 만료됩니다. 사용자 계정, 영속·분산 쿼터, JSON 크기·동시 작업 제한, 에지 DDoS 방어, 멱등 등록·복구는 운영 전 후속 조건입니다.
+이 키는 신뢰한 개발 기기의 접근 수단이며 일반 사용자 로그인이나 FCM 기기 소유 증명이 아닙니다. 공용 키를 APK에 내장하지 않습니다. 회수할 키를 서버 목록에서 제거한 뒤 `docker compose --env-file .env up -d --force-recreate backend`로 새 환경을 적용합니다. 키 파일은 0600 권한을 유지하고, 유출 키는 새로 생성해 교체합니다. 회수 후 기존 감시 취소가 실패할 수 있으며 서버 세션은 최대 2시간 후 만료됩니다. 사용자 계정, 영속·분산 쿼터, JSON 크기·동시 작업 제한, 에지 DDoS 방어, 운영 DB·백업 복구 검증은 운영 전 후속 조건입니다.
 
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
 
@@ -75,7 +75,7 @@ python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
 
 `deploy/cloudflared/config.disabled.example.yml`에는 실제 hostname route가 없고 마지막 `http_status:404` 규칙만 있습니다. 자격 증명 경로와 UUID도 예시입니다. Compose에 cloudflared 서비스가 없으며 실행·DNS 생성·계정 변경은 수행하지 않았습니다.
 
-서버에는 이번 개발 기기 Bearer 인증과 프로세스 내 호출 제한이 있지만, 운영용 사용자 인증·영속 세션·분산 쿼터·에지 방어는 없습니다. 이번 구현만으로 인터넷 공개용 운영 보안이 완성되지는 않습니다. Quick Tunnel이나 public hostname은 이번 작업에서 실행하지 않습니다. 개발 연결 전에도 실제 인증 동작, 비밀 전달·회수, HTTPS hostname, 기기 접속 정책과 로그 비밀 노출 여부를 확인해야 합니다. Cloudflare 브라우저 로그인 정책만 설정했다고 Android 네이티브 API 인증이 자동 완성되는 것도 아닙니다.
+서버에는 이번 개발 기기 Bearer 인증과 프로세스 내 호출 제한이 있지만, 운영용 사용자 인증·Supabase 연결·분산 쿼터·에지 방어는 없습니다. 이번 구현만으로 인터넷 공개용 운영 보안이 완성되지는 않습니다. Quick Tunnel이나 public hostname은 이번 작업에서 실행하지 않습니다. 개발 연결 전에도 실제 인증 동작, 비밀 전달·회수, HTTPS hostname, 기기 접속 정책과 로그 비밀 노출 여부를 확인해야 합니다. Cloudflare 브라우저 로그인 정책만 설정했다고 Android 네이티브 API 인증이 자동 완성되는 것도 아닙니다.
 
 그 조건이 준비된 뒤 운영자가 named Tunnel과 DNS를 별도로 구성하고, 같은 PC에서 실행하는 cloudflared의 origin을 `http://127.0.0.1:8080`으로 설정합니다. 외부 구간은 Cloudflare HTTPS이며 이 로컬 HTTP origin은 같은 PC 내부에 한정됩니다. cloudflared를 별도 컨테이너에 넣는 경우 그 컨테이너의 localhost는 백엔드가 아니므로 전용 네트워크의 서비스 주소로 다시 설계해야 합니다. 비활성 예제는 이 별도 컨테이너 방식을 구성하지 않습니다.
 
@@ -91,7 +91,7 @@ cloudflared tunnel --config deploy/cloudflared/config.disabled.example.yml ingre
 
 이번 Docker 검사기의 로컬 테스트는 가짜 Docker 응답으로 실패 경로와 판정을 검증하고, 실제 이미지 빌드·healthcheck·재시작·정리는 GitHub Actions의 별도 Docker 작업으로 검증합니다. 실행 결과는 [Docker 검증 기록](verification-docker.md)에 구분해서 남깁니다. [CI #20의 Docker 작업](https://github.com/yuilyoung/subway_alert/actions/runs/40530621386/job/122282085504)은 실제 이미지 빌드·기동·인증·호출 제한·재시작·정리를 통과했습니다. 이전 애플리케이션·키 생성·Compose 정적 검증은 [접근 보호 검증 기록](verification-deployment.md)에 있습니다.
 
-Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하고, 인증된 HTTPS 개발 경로에서 TEST 알림을 실기기로 검증해야 합니다. 실제 하차 알림은 서울 실키 HTTPS·경로·시간대·운행 예외를 확인하기 전까지 차단 상태로 유지합니다. 운영 전에는 영속 DB·재시작 복구·모니터링·사용자 인증·분산 쿼터·전송 재시도/멱등성·권한 정리가 추가로 필요합니다. 이번 작업은 Tunnel·Firebase·VPS·DB·Play 자원을 생성하지 않습니다.
+Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하고, 인증된 HTTPS 개발 경로에서 TEST 알림을 실기기로 검증해야 합니다. 실제 하차 알림은 서울 실키 HTTPS·경로·시간대·운행 예외를 확인하기 전까지 차단 상태로 유지합니다. 운영 전에는 Supabase 운영 연결·백업 복구·모니터링·사용자 인증·분산 쿼터·전송 정책·권한 정리가 추가로 필요합니다. 이번 작업은 Tunnel·Firebase·VPS·클라우드 DB·Play 자원을 생성하지 않습니다. 선택형 로컬 DB의 데이터 볼륨 생성은 아래 별도 실행 명령을 수행할 때 일어납니다.
 
 ## 공식 참고
 
@@ -101,3 +101,7 @@ Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하�
 - [Dockerfile USER와 HEALTHCHECK](https://docs.docker.com/reference/dockerfile/)
 - [Cloudflare Tunnel 설정](https://developers.cloudflare.com/tunnel/get-started/)
 - [Cloudflare Tunnel 로컬 설정과 catch-all 규칙](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/)
+
+## 선택형 PostgreSQL 등록 기록
+
+기본 Compose는 메모리 모드입니다. `compose.postgres.yaml`을 추가하면 외부 계정 없이 로컬 PostgreSQL 17을 실행하고 TEST 등록·취소 기록을 보존합니다. DB를 호스트 포트로 게시하지 않으며, 볼륨은 일반 `down` 뒤 유지됩니다. `down -v`는 기록을 지우므로 일반 중지 절차에서 사용하지 않습니다. 명령과 비밀 생성·재시작·장애 복구는 [PostgreSQL 안내](durable-receipts.md)를 따릅니다.
