@@ -42,6 +42,8 @@ jobs:
       - name: Build and test server
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Smoke test packaged API authentication and limits
+        run: python3 deploy/smoke_api_access.py --jar server/target/subway-alert-server-0.1.0.jar
       - name: Run standalone tracking engine tests
         working-directory: server
         run: |
