@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {Alert, AppState, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import * as Notifications from 'expo-notifications';
+import LiveTrains from './src/LiveTrains';
 import {readState,writeState,enableMonitoring,disableMonitoring,requestNotificationPermissions} from './src/background';
 const stations=require('./src/stations');
 const {addFavorite,findRoute}=require('./src/domain');
@@ -33,7 +34,7 @@ export default function App(){
  async function toggleAuto(){return run(async()=>{if(!state.automation){if(!state.favorites.length)throw Error('먼저 즐겨찾기를 등록하세요.');await enableMonitoring();await update(s=>({...s,automation:true}));Alert.alert('출퇴근 감시 시작 (데모)','사용자가 앱을 연 상태에서 서비스가 시작됩니다. 지정한 평일 시간에 출발역 근처를 감지하면 자동 탑승 확인 알림을 보냅니다. 앱에서 직접 감시를 시작해야 합니다.');}else {await update(s=>({...s,automation:false}));if(!state.active)await disableMonitoring();}})}
  return <SafeAreaView style={styles.screen}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
  <Text style={styles.title}>지하철 하차 알림</Text><Text style={styles.subtitle}>화면이 꺼져도 경로를 감시하는 Android 데모</Text>
- <View style={styles.warning}><Text style={styles.warningText}>데모 전용 · 서울 2호선 일부 5개 역과 검증되지 않은 대략 좌표입니다. 지하 GPS는 끊길 수 있으며 실시간 열차 연동이 없어 실제 하차 알림으로 사용하지 마세요.</Text></View>
+ <View style={styles.warning}><Text style={styles.warningText}>데모 전용 · 서울 2호선 일부 5개 역과 검증되지 않은 대략 좌표입니다. 지하 GPS는 끊길 수 있으며 열차 조회와 알림이 연결되지 않아 실제 하차 알림으로 사용하지 마세요.</Text></View>
  <Text style={styles.heading}>1. 출발역과 도착역</Text>
  <View style={styles.row}><Btn secondary={select!=='from'} label={`출발  ${name(from)}`} onPress={()=>setSelect('from')}/><Btn secondary={select!=='to'} label={`도착  ${name(to)}`} onPress={()=>setSelect('to')}/></View>
  <TextInput style={styles.input} value={query} onChangeText={setQuery} placeholder={`${select==='from'?'출발역':'도착역'} 검색`} />
@@ -48,7 +49,8 @@ export default function App(){
  <Btn label={state.automation?'출퇴근 감지 알림 끄기':'출퇴근 감지 알림 켜기'} onPress={toggleAuto}/><Text style={styles.small}>앱에서 감시를 켜야 작동하며 상시 위치 알림이 표시됩니다. 재부팅·강제 종료·절전 정책 및 위치 신호에 따라 중단되거나 지연될 수 있습니다.</Text>
  <Text style={styles.heading}>3. 역 안내</Text>
  {[{id:from,label:'출발'},{id:to,label:'도착'}].filter(x=>x.id).map(({id,label})=><View key={label+id} style={styles.card}><Text style={styles.bold}>{label} · {name(id)}</Text><Text>빠른 환승 · 화장실 · 편의시설 · 개찰구 · 출구: 확인된 정보 없음</Text></View>)}
- <Text style={styles.small}>역 시설의 실제 정보와 실시간 열차 API는 연결되지 않았습니다. 출발역과 목적지는 이 데모의 5개 역에서만 검색할 수 있습니다.</Text>
+ <Text style={styles.small}>역 시설 정보는 연결되지 않았습니다. 출발역과 목적지는 이 데모의 5개 역에서만 검색할 수 있습니다.</Text>
+ <LiveTrains />
  </ScrollView></SafeAreaView>
 }
 const styles=StyleSheet.create({screen:{flex:1,backgroundColor:'#f5f7fc'},content:{padding:20,paddingBottom:50},title:{fontSize:28,fontWeight:'800',color:'#132344'},subtitle:{color:'#53627c',marginVertical:8},heading:{fontSize:19,fontWeight:'700',marginTop:24,marginBottom:12,color:'#172b50'},warning:{backgroundColor:'#fff0cf',padding:14,borderRadius:10,marginTop:12},warningText:{color:'#744b00',lineHeight:21},row:{flexDirection:'row',alignItems:'center',gap:8,marginVertical:6,flexWrap:'wrap'},button:{backgroundColor:'#2854d5',paddingHorizontal:13,paddingVertical:11,borderRadius:8,alignItems:'center'},secondary:{backgroundColor:'#e5eaf7'},buttonText:{color:'white',fontWeight:'700'},secondaryText:{color:'#273e70'},input:{backgroundColor:'white',borderColor:'#cbd4e5',borderWidth:1,borderRadius:8,padding:12,marginVertical:8},time:{minWidth:90},station:{padding:12,borderBottomWidth:1,borderColor:'#e0e5ef',backgroundColor:'white'},info:{color:'#2854d5',marginVertical:10},status:{marginVertical:8,color:'#4d607c'},card:{backgroundColor:'white',borderRadius:10,padding:14,marginVertical:6,gap:5},bold:{fontWeight:'700'},small:{color:'#5a6780',fontSize:12,lineHeight:18,marginTop:8}});
