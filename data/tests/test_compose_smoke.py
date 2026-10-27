@@ -164,8 +164,8 @@ class DockerBoundary:
                 raise AssertionError('default image tag would be mutated')
             if 'build' in command:
                 self.builds += 1
-                failure = self.fail == 'build'
-                self.image_exists = not failure
+                failure = self.fail in ('build', 'build-query')
+                self.image_exists = not failure or self.fail == 'build-query'
             elif 'up' in command:
                 if '--wait' not in command or '--wait-timeout' not in command:
                     raise AssertionError('startup did not require Docker health')
@@ -191,8 +191,13 @@ class DockerBoundary:
         elif command[:2] == ['docker', 'exec']:
             output = '10001\n'
         elif command[:3] == ['docker', 'image', 'inspect']:
-            failure = not self.image_exists
+            failure = not self.image_exists or self.fail == 'build-query'
             output = 'sha256:' + 'f' * 64 if self.image_exists else ''
+        elif command[:3] == ['docker', 'image', 'ls']:
+            if command[-1] != 'reference=' + self.tag:
+                raise AssertionError('query escaped the isolated image tag')
+            failure = self.fail == 'build-query'
+            output = 'f' * 64 if self.image_exists else ''
         elif command[:3] == ['docker', 'image', 'rm']:
             if command[-1] != self.tag:
                 raise AssertionError('attempted to remove an unrelated image')
@@ -281,6 +286,15 @@ class ComposeLifecycleTests(unittest.TestCase):
                 self.assertEqual(result, 1)
                 self.assertEqual(report['status'], 'failed')
                 self.assertEqual(report['cleanup']['status'], 'failed')
+
+    def test_image_query_error_after_failed_build_is_not_reported_as_clean(self):
+        boundary = DockerBoundary(fail='build-query')
+        result, report, _, _ = self.run_fixture(boundary)
+        self.assertEqual(result, 1)
+        self.assertTrue(boundary.image_exists)
+        self.assertEqual(report['cleanup']['status'], 'failed')
+        self.assertEqual(report['cleanup']['image'], 'failed')
+        self.assertIn('cleanup-image', report['failures'])
 
     def test_old_or_unrecognized_engine_cannot_claim_loopback_isolation(self):
         for version in ('27.5.1', '20.10.24', '', 'not-a-version'):

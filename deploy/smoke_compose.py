@@ -192,9 +192,9 @@ def run_smoke():
                     report['failures'].append('cleanup-project')
                 try:
                     exists = built or command(
-                        ['docker', 'image', 'inspect', '--format', '{{.Id}}', image],
-                        environment, 'cleanup-image-inspect', allowed=(0, 1)
-                    ).returncode == 0
+                        ['docker', 'image', 'ls', '--quiet', '--filter', 'reference=' + image],
+                        environment, 'cleanup-image-query'
+                    ).stdout.strip() != ''
                     if exists:
                         command(['docker', 'image', 'rm', image], environment, 'cleanup-image',
                                 timeout=60)

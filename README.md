@@ -8,12 +8,12 @@
 
 | 구성 | 역할 | 개발·운영 기준 | 실제 상태 |
 | --- | --- | --- | --- |
-| 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | 독립 Docker 실행 검사 추가, 실제 CI 결과 대기 |
+| 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | CI #20의 실제 이미지·기동·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
 | Cloudflare Tunnel | 실행 중인 API를 HTTPS 주소로 연결 | 개발 기기 검증용 연결 수단 | 계정·도메인·터널 미구성, 템플릿만 작성 |
 | 운영 백엔드 호스트 | API·스케줄러 24시간 실행 | 상시 실행 Linux 서버 + Docker | VPS 업체·리전·요금 미선정, 서버 미생성 |
 | Supabase | 향후 PostgreSQL 영속 저장 | 운영 데이터 저장 목표 | 이 앱에 연결할 프로젝트 미확정, 스키마 초안 미적용 |
 | Firebase FCM | Android 원격 푸시 전달 | 시험 알림 전송 코드 구현 | 실제 자격 증명·기기 수신 미검증 |
-| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | 접근 보호 CI #17의 3개 작업·시험 APK 성공, 새 Docker 작업 결과 대기 |
+| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | CI #17의 시험 APK 성공, CI #20의 Docker 작업 성공 |
 | Google Play | 앱 설치·업데이트 유통 | Android 정식 배포처 | 계정·앱 등록·심사 미진행 |
 | APK 직접 설치 | 소수 개발자의 기기 시험 | 정식 출시 전 내부 시험 | 독립 ARM64 시험 APK 빌드·서명 검사 완료 |
 
@@ -115,10 +115,10 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 - [설계·아키텍처 v1.2](docs/architecture.md): 현재 구현과 목표, 개발 접근 보호와 운영 미완료 항목. 별도 PDF v1.1에는 이번 개정이 아직 반영되지 않았습니다.
 - [배포 실행 안내](docs/deployment.md), [서버 API와 FCM](server/README.md), [Android 앱](mobile/README.md), [Supabase 초안](supabase/README.md).
 - 접근 보호 검증: 서버 52개·모바일 35개·Python 12개 테스트와 실행 JAR 인증·호출 제한 검사, CI #17의 독립 ARM64 시험 APK 생성 성공. 실제 기기 설치·FCM 수신은 미검증입니다.
-- [접근 보호·배포 구성 기록](docs/verification-deployment.md), [Docker 실행 검증 기록](docs/verification-docker.md): 로컬 가짜 응답 테스트와 실제 Docker CI를 구분하며, 새 Docker CI 결과는 대기 중입니다. Tunnel 연결·Play 게시 완료를 뜻하지 않습니다.
+- [접근 보호·배포 구성 기록](docs/verification-deployment.md), [Docker 실행 검증 기록](docs/verification-docker.md): 로컬 가짜 응답 테스트와 실제 Docker CI를 구분하며, CI #20의 Docker 작업과 안전한 보고서 성공을 확인했습니다. Tunnel 연결·Play 게시 완료를 뜻하지 않습니다.
 
 호출 예산은 단일 프로세스 기준 전체 600회/분, 기기 키별 60회/분, 세션 생성 키별 3회/분입니다. 직접 열차 조회는 모든 키 합계 6회/분·서울 날짜 하루 240회이고 시험 감시 공유 폴링의 하루 600회와 별도여서 sample 모드에서 합계 최대 840회/일입니다. 재시작·복제하면 예산이 초기화·증가하므로 운영 과금 제어는 아닙니다.
 
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
 
-다음 순서는 Docker CI 결과 확인·개발 PC 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.
+다음 순서는 개발 PC Docker 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.

@@ -4,7 +4,7 @@
 
 | 항목 | 이번 개발 기준 | 실제 상태 |
 | --- | --- | --- |
-| 개발 백엔드 | 개발자 PC의 Docker Compose에서 Spring Boot 실행 | 독립 Docker 실행 검사 추가, 실제 CI 결과 대기 |
+| 개발 백엔드 | 개발자 PC의 Docker Compose에서 Spring Boot 실행 | CI #20의 이미지·컨테이너·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
 | 개발 HTTPS 진입점 | 같은 PC의 Cloudflare named Tunnel | 비활성 예제만 작성, 계정·도메인·터널 미생성 |
 | 베타·운영 백엔드 | 상시 실행 Linux 서버에서 같은 Docker 이미지 실행 | 서버 업체·요금·지역 미선정, 실제 배포 없음 |
 | 데이터베이스 | Supabase PostgreSQL 계획 | 스키마 초안, 앱·서버 미연동 |
@@ -89,7 +89,7 @@ cloudflared tunnel --config deploy/cloudflared/config.disabled.example.yml ingre
 
 현재 작업 환경에는 Docker/Podman 엔진과 cloudflared가 없습니다. 앞선 접근 보호 변경은 Compose 구성 해석과 실행 JAR 인증 검사를 거쳐 [CI #17](https://github.com/yuilyoung/subway_alert/actions/runs/40525199870)의 3개 작업·시험 APK 생성까지 성공했습니다. 이 실행에는 새 Docker 작업이 없으므로 이미지·컨테이너 검증의 증거로 사용하지 않습니다.
 
-이번 Docker 검사기의 로컬 테스트는 가짜 Docker 응답으로 실패 경로와 판정을 검증하고, 실제 이미지 빌드·healthcheck·재시작·정리는 GitHub Actions의 별도 Docker 작업으로 검증합니다. 실행 결과는 [Docker 검증 기록](verification-docker.md)에 구분해서 남깁니다. 새 Docker 작업의 실제 결과는 현재 대기 중입니다. 이전 애플리케이션·키 생성·Compose 정적 검증은 [접근 보호 검증 기록](verification-deployment.md)에 있습니다.
+이번 Docker 검사기의 로컬 테스트는 가짜 Docker 응답으로 실패 경로와 판정을 검증하고, 실제 이미지 빌드·healthcheck·재시작·정리는 GitHub Actions의 별도 Docker 작업으로 검증합니다. 실행 결과는 [Docker 검증 기록](verification-docker.md)에 구분해서 남깁니다. [CI #20의 Docker 작업](https://github.com/yuilyoung/subway_alert/actions/runs/40530621386/job/122282085504)은 실제 이미지 빌드·기동·인증·호출 제한·재시작·정리를 통과했습니다. 이전 애플리케이션·키 생성·Compose 정적 검증은 [접근 보호 검증 기록](verification-deployment.md)에 있습니다.
 
 Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하고, 인증된 HTTPS 개발 경로에서 TEST 알림을 실기기로 검증해야 합니다. 실제 하차 알림은 서울 실키 HTTPS·경로·시간대·운행 예외를 확인하기 전까지 차단 상태로 유지합니다. 운영 전에는 영속 DB·재시작 복구·모니터링·사용자 인증·분산 쿼터·전송 재시도/멱등성·권한 정리가 추가로 필요합니다. 이번 작업은 Tunnel·Firebase·VPS·DB·Play 자원을 생성하지 않습니다.
 
