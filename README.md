@@ -112,7 +112,7 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 
 ## 문서·검증·다음 작업
 
-- [설계·아키텍처 v1.2](docs/architecture.md): 현재 구현과 목표, 개발 접근 보호와 운영 미완료 항목. 별도 PDF v1.1에는 이번 개정이 아직 반영되지 않았습니다.
+- [설계·아키텍처 v1.3](docs/architecture.md): 현재 구현과 목표, 개발 접근 보호와 운영 미완료 항목. 별도 PDF v1.1에는 이번 개정이 아직 반영되지 않았습니다.
 - [배포 실행 안내](docs/deployment.md), [서버 API와 FCM](server/README.md), [Android 앱](mobile/README.md), [Supabase 초안](supabase/README.md).
 - 접근 보호 검증: 서버 52개·모바일 35개·Python 12개 테스트와 실행 JAR 인증·호출 제한 검사, CI #17의 독립 ARM64 시험 APK 생성 성공. 실제 기기 설치·FCM 수신은 미검증입니다.
 - [접근 보호·배포 구성 기록](docs/verification-deployment.md), [Docker 실행 검증 기록](docs/verification-docker.md): 로컬 가짜 응답 테스트와 실제 Docker CI를 구분하며, CI #20의 Docker 작업과 안전한 보고서 성공을 확인했습니다. Tunnel 연결·Play 게시 완료를 뜻하지 않습니다.
@@ -122,3 +122,5 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
 
 다음 순서는 개발 PC Docker 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.
+
+감시 등록은 ID·세션 비밀을 기기에 먼저 보관해 응답 유실 뒤 같은 요청을 조회·재시도·종료하도록 구현합니다. 오래된 관측의 재등록과 앱 복원 시 자동 POST는 차단합니다. 새 필수 등록 헤더가 포함된 앱 빌드가 필요하며 프로세스 재시작·다중 인스턴스 복구는 후속 작업입니다. [등록 응답 유실과 복구](docs/registration-recovery.md)를 참고하세요.

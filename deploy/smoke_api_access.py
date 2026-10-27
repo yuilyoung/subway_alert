@@ -13,14 +13,20 @@ import socket
 import subprocess
 import tempfile
 import time
+import uuid
 
 
-def request(port, path, token=None, method='GET', body=None, duplicate=False):
+def request(port, path, token=None, method='GET', body=None, duplicate=False,
+            session_token=None, idempotency_key=None):
     connection = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
     try:
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['Authorization'] = 'Bearer ' + token
+        if session_token:
+            headers['X-Session-Token'] = session_token
+        if idempotency_key:
+            headers['Idempotency-Key'] = idempotency_key
         if duplicate:
             connection.putrequest(method, path)
             connection.putheader('Authorization', 'Bearer ' + token)
@@ -68,7 +74,8 @@ def server(jar, token):
                 process.kill()
                 process.wait(timeout=5)
             log.seek(0)
-            if token and token.encode() in log.read():
+            output = log.read()
+            if any(value.encode() in output for value in token.split(',') if value):
                 raise AssertionError('Server log exposed API credential material')
 
 
@@ -104,6 +111,43 @@ def check_keyed(port, token):
     require(all(token.encode() not in value[2] for value in responses), 'API response must not expose key')
 
 
+def check_registration_recovery(port, token):
+    """A cancelled intent never starts polling, including a lost response and late replay."""
+    identity, secret = str(uuid.uuid4()), secrets.token_hex(32)
+    path = '/api/monitor-sessions/' + identity
+    status, _, payload = request(port, path, token, 'DELETE', session_token=secret)
+    require(status == 200, 'cancel-before-create must succeed')
+    cancelled = json.loads(payload)
+    require(cancelled['status'] == 'CANCELLED', 'cancel-before-create must retain a tombstone')
+    expires = cancelled['expiresAt']
+    body = json.dumps({'lineId': '2', 'trainId': '0202', 'direction': 'INNER',
+                       'previousStation': '선릉', 'destinationStation': '삼성',
+                       'fcmToken': 'smoke-token-never-sent', 'mode': 'TEST'})
+    # Read only headers, then discard the response body as a deterministic lost-result boundary.
+    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
+    try:
+        connection.request('POST', '/api/monitor-sessions', body=body, headers={
+            'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
+            'Idempotency-Key': identity, 'X-Session-Token': secret})
+        require(connection.getresponse().status == 200, 'late registration must return a result')
+    finally:
+        connection.close()
+    status, _, payload = request(port, path, token, session_token=secret)
+    require(status == 200 and json.loads(payload)['status'] == 'CANCELLED',
+            'known client ID must remain queryable without a creation response')
+    require(secret.encode() not in payload, 'status must not disclose session credentials')
+    status, _, payload = request(port, '/api/monitor-sessions', token, 'POST', body,
+                                 session_token=secret, idempotency_key=identity)
+    replay = json.loads(payload)
+    require(status == 200 and replay['id'] == identity and replay['sessionToken'] == secret
+            and replay['status'] == 'CANCELLED' and replay['expiresAt'] == expires,
+            'replay must preserve cancellation, identity and original expiry')
+    status, _, payload = request(port, '/api/monitor-sessions', token, 'POST', body,
+                                 session_token=secrets.token_hex(32), idempotency_key=identity)
+    require(status == 409, 'conflicting registration capability must be rejected')
+    require(secret.encode() not in payload, 'conflict must not disclose the original credential')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jar', type=Path, required=True)
@@ -112,10 +156,12 @@ def main():
         parser.error('server JAR is missing; run Maven verify first')
     with server(args.jar, '') as port:
         check_unconfigured(port)
-    token = secrets.token_urlsafe(32)
-    with server(args.jar, token) as port:
+    token, recovery_token = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    with server(args.jar, token + ',' + recovery_token) as port:
         check_keyed(port, token)
+        check_registration_recovery(port, recovery_token)
     print('Packaged API smoke: health 200, unconfigured 503, missing/wrong/duplicate key 401, valid key 200, creation/burst 429; no external API calls')
+    print('Registration recovery smoke: cancel-before-create, discarded response, GET recovery, stable cancelled replay and conflict 409 passed')
 
 
 if __name__ == '__main__':

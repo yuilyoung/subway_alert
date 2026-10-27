@@ -57,7 +57,7 @@ class ApiAccessIntegrationTest {
 
   @Test void apiKeyDoesNotReplaceMonitorSessionCapability() throws Exception {
     String body="{\"lineId\":\"2\",\"trainId\":\"0202\",\"direction\":\"INNER\",\"previousStation\":\"선릉\",\"destinationStation\":\"삼성\",\"fcmToken\":\"test-token\",\"mode\":\"TEST\"}";
-    var response=mvc.perform(post("/api/monitor-sessions").header("Authorization",AUTH).contentType("application/json").content(body)).andExpect(status().isOk()).andReturn();
+    var response=mvc.perform(post("/api/monitor-sessions").header("Idempotency-Key",java.util.UUID.randomUUID().toString()).header("X-Session-Token","a".repeat(64)).header("Authorization",AUTH).contentType("application/json").content(body)).andExpect(status().isOk()).andReturn();
     var created=json.readTree(response.getResponse().getContentAsString());
     String path="/api/monitor-sessions/"+created.path("id").asText(), secret=created.path("sessionToken").asText();
     mvc.perform(get(path).header("Authorization",AUTH)).andExpect(status().isNotFound());

@@ -19,6 +19,7 @@ class ApiResponseError extends Error {
   constructor(status,retryAfter=null) {
     const message=status===401?'접근 키가 없거나 만료·회수되었습니다. 서버 연결 키를 확인하세요.':
       status===403?'이 요청을 수행할 권한이 없습니다.':
+      status===409?'기존 등록 정보와 충돌합니다. 저장된 감시 결과를 조회하거나 종료한 뒤 다시 등록하세요.':
       status===429?`요청 한도에 도달했습니다. ${retryAfter?`${retryAfter}초 후에 `:''}다시 시도하세요.`:
       status===503?'서버가 요청을 처리할 수 없습니다. 서버의 접근 키 설정과 실행 상태를 확인하세요.':
       `서버 응답 오류 (${status})`;
@@ -42,7 +43,7 @@ async function requestJson(server,path,options={},accessToken,development=false,
     return await response.json();
   } catch(error) {
     if(error instanceof ApiResponseError) throw error;
-    if((options.method||'GET')!=='GET') throw new Error('요청 결과를 확인할 수 없습니다. 서버에서 이미 처리되었을 수 있습니다. 중복 요청 전 상태를 확인하세요. 등록 결과를 잃은 경우 세션은 최대 2시간 후 만료됩니다.');
+    if((options.method||'GET')!=='GET') throw new Error('요청 결과를 확인할 수 없습니다. 서버에서 이미 처리되었을 수 있습니다. 저장된 감시 결과를 조회하거나 동일 요청을 명시적으로 재시도하거나 종료하세요. 세션은 최대 2시간 후 만료됩니다.');
     throw new Error(abort.signal.aborted?'서버 응답 시간이 초과되었습니다.':'서버에 연결할 수 없거나 응답을 읽을 수 없습니다.');
   } finally {clearTimeout(timer);}
 }
