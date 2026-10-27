@@ -22,7 +22,7 @@ Spring Boot 3 / Java 17. PDF의 Java 21과 달리 현재 개발 환경에서 사
 
 분 한도는 token bucket으로 연속 보충하고 한도 초과는 429와 양의 정수 초 단위 `Retry-After`를 반환합니다. 인증 전 한도는 잘못된 키 요청에도 적용합니다. 모든 키의 직접 조회 240회와 감시 폴링 600회를 합쳐 최대 840회/일/프로세스입니다. 동시 요청에도 한도 초과 허용을 막지만 메모리 상태이므로 재시작·인스턴스 복제에 따른 초기화·증가는 막지 못합니다. 운영 과금 제어를 대신하지 않습니다.
 
-이 키는 신뢰한 시험 참가자 접근용이며 일반 사용자 인증이나 FCM 토큰 소유 증명이 아닙니다. APK에 공용 키를 넣지 않습니다. 유출·회수 시 서버의 허용 목록에서 제거하고 서버를 재시작하며, 앱이 기존 감시를 취소하지 못하면 최대 2시간 만료를 안내해야 합니다. 일반 사용자 로그인·영속/분산 쿼터·JSON 크기·동시 작업 제한·에지 DDoS 방어·멱등 등록·복구는 운영 전 과제입니다. 공개 Tunnel은 여전히 비활성 상태입니다.
+이 키는 신뢰한 시험 참가자 접근용이며 일반 사용자 인증이나 FCM 토큰 소유 증명이 아닙니다. APK에 공용 키를 넣지 않습니다. 유출·회수 시 서버의 허용 목록에서 제거하고 서버를 재시작하며, 앱이 기존 감시를 취소하지 못하면 최대 2시간 만료를 안내해야 합니다. 일반 사용자 로그인·영속/분산 쿼터·JSON 크기·동시 작업 제한·에지 DDoS 방어·영속 멱등 등록·복구는 운영 전 과제입니다. 공개 Tunnel은 여전히 비활성 상태입니다.
 
 ## 모의 API
 
@@ -45,11 +45,12 @@ Spring Boot 3 / Java 17. PDF의 Java 21과 달리 현재 개발 환경에서 사
 
 이 경로는 실제 열차 탑승 여부와 실제 하차역을 판정하지 않습니다. 서버는 `mode=TEST`만 받아들이며 `LIVE` 세션을 거부합니다. 서울시 샘플은 일부 5건뿐이고 이전역·방향·시각은 검증되지 않았습니다. 시험 알림에는 `[시험]`과 실제 열차 위치와 무관하다는 문구가 들어갑니다.
 
-- `POST /api/monitor-sessions`: JSON에 `lineId` (`2`), `trainId` (문자열), `direction` (`INNER` 또는 `OUTER`), `previousStation`, `destinationStation`, `fcmToken`, `mode` (`TEST`)를 포함합니다. 응답은 `id`, 일회 확인용 `sessionToken`, `status`, `mode`, `expiresAt`입니다.
+- `POST /api/monitor-sessions`: Bearer 외에 앱이 미리 만든 `Idempotency-Key`(소문자 UUID v4)와 `X-Session-Token`(32바이트 난수의 소문자 hex 64자)이 필수입니다. JSON은 `lineId` (`2`), `trainId` (문자열), `direction` (`INNER` 또는 `OUTER`), `previousStation`, `destinationStation`, `fcmToken`, `mode` (`TEST`)입니다. 응답 `id`는 요청 UUID, `sessionToken`은 클라이언트 비밀이며 `status`, `mode`, `expiresAt`을 함께 반환합니다.
 - `GET /api/monitor-sessions/{id}`, `DELETE /api/monitor-sessions/{id}`: `X-Session-Token` 헤더로 소유 세션만 조회·취소합니다. 조회 응답에 토큰은 없습니다.
 - `POST /api/monitor-sessions/{id}/test`: 위 헤더로 명시적 시험 알림을 보냅니다. 세션당 30초, 프로세스 전체 분당 30회로 제한하며 자동 매칭과 별도입니다.
 - 세션 `status`는 `TRACKING`, `SAMPLE_MATCHED`, `CANCELLED`, `EXPIRED`입니다. 샘플 매칭 후 해당 세션의 폴링은 중지됩니다. `deliveryStatus`는 `NONE`, `SENDING`, `FCM_ACCEPTED`, `UNAVAILABLE`, `FAILED`이며 전송 실패를 자동 재시도하지 않습니다. `FCM_ACCEPTED`는 Firebase의 요청 수락만 뜻하며 기기 도착·표시를 보장하지 않습니다.
-- 앱에서 생성 요청이 서버에 도착했으나 응답을 잃으면 토큰을 복구할 수 없습니다. 요청 재시도는 중복 세션을 만들 수 있으며 기존 세션은 최대 2시간 후 만료됩니다. 멱등성 및 중복 방지는 미구현입니다.
+- 같은 ID·세션 비밀·정규화한 본문은 같은 세션의 현재 결과를 반환하고 만료시각을 연장하거나 감시를 다시 켜지 않습니다. 다른 비밀·본문은 409, 형식 오류는 400입니다. 서버는 비밀과 요청의 해시를 보관하며 재생용 원문 세션 비밀을 저장하지 않습니다.
+- 앱은 ID와 비밀을 먼저 저장하므로 최초 응답을 잃어도 기존 GET/DELETE로 조회·종료할 수 있습니다. 등록보다 DELETE가 먼저 도착하면 CANCELLED 표식을 만들어 늦은 등록을 막습니다. 표식도 500개 한도와 2시간 만료·추가 1시간 보관에 포함됩니다. 서버 재시작·보관 만료·여러 인스턴스 사이의 중복 방지는 아직 보장하지 않습니다. [등록 복구 계약](../docs/registration-recovery.md)을 확인하세요.
 
 스케줄러는 활성 TEST 세션이 있을 때만 서울시 공개 `sample`을 공유해 기본 120초 간격으로 조회하고, 이 프로세스 기준 서울 날짜 하루에 최대 600회 요청합니다. 한 폴링당 전송 시도는 최대 10건입니다. `/api/live/trains`의 별도 하루 240회 한도와 sample 모드에서 합계 최대 840회입니다. 한도는 프로세스 메모리에만 존재해 재시작하면 초기화됩니다. 다중 인스턴스·장애 재시작을 포함한 운영 쿼터 제어는 아닙니다. 모든 세션은 메모리에만 있고 서버 재시작 시 사라집니다.
 

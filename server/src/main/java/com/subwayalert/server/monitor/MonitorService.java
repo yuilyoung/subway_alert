@@ -12,8 +12,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
@@ -49,16 +49,26 @@ public final class MonitorService {
                                String deliveryStatus,String pollStatus) { }
   public static final class NotFound extends RuntimeException { }
   public static final class Conflict extends RuntimeException { public Conflict(String msg){super(msg);} }
+  public static final class CapacityExceeded extends RuntimeException { }
 
   private static final class Session {
-    final UUID id; final byte[] tokenHash; final String previous,destination; final Instant expires;
-    final LiveTrainMatcher matcher;
-    String fcmToken; volatile String status="TRACKING"; String delivery="NONE";
+    final UUID id; final byte[] tokenHash,requestFingerprint;
+    final String previous,destination; final Instant expires; final LiveTrainMatcher matcher;
+    String fcmToken; volatile String status; String delivery="NONE";
     Instant lastManualTest; boolean inFlight;
-    Session(UUID id,byte[] tokenHash,String previous,String destination,Instant expires,
-            String fcmToken,LiveTrainMatcher matcher) {
-      this.id=id;this.tokenHash=tokenHash;this.previous=previous;this.destination=destination;
-      this.expires=expires;this.fcmToken=fcmToken;this.matcher=matcher;
+    private Session(UUID id,byte[] tokenHash,byte[] requestFingerprint,String previous,String destination,
+                    Instant expires,String fcmToken,LiveTrainMatcher matcher,String status) {
+      this.id=id;this.tokenHash=tokenHash;this.requestFingerprint=requestFingerprint;
+      this.previous=previous;this.destination=destination;this.expires=expires;
+      this.fcmToken=fcmToken;this.matcher=matcher;this.status=status;
+    }
+    static Session tracking(UUID id,byte[] tokenHash,byte[] fingerprint,StartRequest req,Instant now) {
+      return new Session(id,tokenHash,fingerprint,req.previousStation(),req.destinationStation(),
+          now.plus(SESSION_LIFETIME),req.fcmToken(),new LiveTrainMatcher("2",req.trainId(),req.direction(),
+              req.previousStation(),now,"SAMPLE",false,false),"TRACKING");
+    }
+    static Session cancelled(UUID id,byte[] tokenHash,Instant now) {
+      return new Session(id,tokenHash,null,null,null,now.plus(SESSION_LIFETIME),null,null,"CANCELLED");
     }
   }
 
@@ -69,29 +79,49 @@ public final class MonitorService {
     this.gateway=gateway;this.clock=clock;this.dailyLimit=dailyLimit;
   }
 
-  public synchronized StartResponse start(StartRequest req) {
-    Instant now=clock.instant(); prune(now);
-    if(req==null||!"TEST".equals(req.mode())||!"2".equals(req.lineId())||
-       !("INNER".equals(req.direction())||"OUTER".equals(req.direction()))||
-       !clean(req.trainId(),64)||!clean(req.previousStation(),64)||!clean(req.destinationStation(),64)||
-       !clean(req.fcmToken(),4096)||req.previousStation().strip().equals(req.destinationStation().strip()))
-      throw new IllegalArgumentException("Only an explicitly configured TEST session is supported");
-    if(sessions.size()>=MAX_SESSIONS)throw new Conflict("Session capacity reached");
-    String train=req.trainId().strip(), previous=req.previousStation().strip(), destination=req.destinationStation().strip();
-    UUID id=UUID.randomUUID();byte[] bytes=new byte[32];random.nextBytes(bytes);
-    String secret=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    Instant expires=now.plus(SESSION_LIFETIME);
-    LiveTrainMatcher matcher=new LiveTrainMatcher("2",train,req.direction(),previous,now,"SAMPLE",false,false);
-    sessions.put(id,new Session(id,digest(secret),previous,destination,expires,req.fcmToken(),matcher));
-    return new StartResponse(id,secret,"TRACKING","TEST",expires);
+  /** Internal convenience entry point; HTTP registrations always supply their own identity. */
+  public StartResponse start(StartRequest req) {
+    byte[] bytes=new byte[32];random.nextBytes(bytes);
+    return start(UUID.randomUUID(),HexFormat.of().formatHex(bytes),req);
+  }
+
+  /** Atomic creation/replay, bounded by this process's in-memory retention window. */
+  public synchronized StartResponse start(UUID id,String secret,StartRequest req) {
+    validateIdentity(id,secret);
+    Instant now=clock.instant();prune(now);
+    Session existing=sessions.get(id);
+    if(existing!=null)synchronized(existing){
+      if(!MessageDigest.isEqual(existing.tokenHash,digest(secret)))throw registrationConflict();
+      // Cancel-before-create deliberately has no request body or matcher to recreate.
+      if(existing.requestFingerprint!=null){
+        byte[] requestedFingerprint;
+        try{requestedFingerprint=fingerprint(canonical(req));}
+        catch(IllegalArgumentException e){throw registrationConflict();}
+        if(!MessageDigest.isEqual(existing.requestFingerprint,requestedFingerprint))throw registrationConflict();
+      }
+      return startView(existing,secret);
+    }
+    StartRequest normalized=canonical(req);
+    if(sessions.size()>=MAX_SESSIONS)throw new CapacityExceeded();
+    Session created=Session.tracking(id,digest(secret),fingerprint(normalized),normalized,now);
+    sessions.put(id,created);
+    return startView(created,secret);
   }
 
   public StatusResponse status(UUID id,String secret){
     Session s=authorized(id,secret);synchronized(s){expire(s,clock.instant());return view(s);}
   }
-  public StatusResponse cancel(UUID id,String secret){
-    Session s=authorized(id,secret);synchronized(s){
-      expire(s,clock.instant());
+  /** Takes the store lock before any session lock, just like creation and pruning. */
+  public synchronized StatusResponse cancel(UUID id,String secret){
+    Instant now=clock.instant();prune(now);
+    Session s=sessions.get(id);
+    if(s==null){
+      validateIdentity(id,secret);
+      if(sessions.size()>=MAX_SESSIONS)throw new CapacityExceeded();
+      s=Session.cancelled(id,digest(secret),now);sessions.put(id,s);
+    }else if(!authorized(s,secret))throw new NotFound();
+    synchronized(s){
+      expire(s,now);
       if(s.status.equals("TRACKING") || s.status.equals("SAMPLE_MATCHED")){s.status="CANCELLED";s.fcmToken=null;}
       return view(s);
     }
@@ -167,8 +197,31 @@ public final class MonitorService {
   }
   private Session authorized(UUID id,String secret){
     Session s; synchronized(this){s=sessions.get(id);}
-    if(s==null||secret==null||secret.length()>128||!MessageDigest.isEqual(s.tokenHash,digest(secret)))throw new NotFound();
+    if(s==null||!authorized(s,secret))throw new NotFound();
     return s;
+  }
+  private static boolean authorized(Session s,String secret){
+    return secret!=null&&secret.length()<=128&&MessageDigest.isEqual(s.tokenHash,digest(secret));
+  }
+  private static StartResponse startView(Session s,String secret){return new StartResponse(s.id,secret,s.status,"TEST",s.expires);}
+  private static Conflict registrationConflict(){return new Conflict("Registration conflicts with an existing session");}
+  private static void validateIdentity(UUID id,String secret){
+    if(id==null||id.version()!=4||id.variant()!=2||secret==null||!secret.matches("[0-9a-f]{64}"))
+      throw new IllegalArgumentException("Invalid registration identity");
+  }
+  private static StartRequest canonical(StartRequest req){
+    if(req==null||!"TEST".equals(req.mode())||!"2".equals(req.lineId())||
+       !("INNER".equals(req.direction())||"OUTER".equals(req.direction()))||
+       !clean(req.trainId(),64)||!clean(req.previousStation(),64)||!clean(req.destinationStation(),64)||
+       !clean(req.fcmToken(),4096)||req.previousStation().strip().equals(req.destinationStation().strip()))
+      throw new IllegalArgumentException("Only an explicitly configured TEST session is supported");
+    return new StartRequest(req.lineId(),req.trainId().strip(),req.direction(),req.previousStation().strip(),
+        req.destinationStation().strip(),req.fcmToken(),req.mode());
+  }
+  private static byte[] fingerprint(StartRequest req){
+    // All fields exclude control characters, making this separator unambiguous. The FCM token is exact.
+    return digest(String.join("\u0000",req.lineId(),req.trainId(),req.direction(),req.previousStation(),
+        req.destinationStation(),req.fcmToken(),req.mode()));
   }
   private StatusResponse view(Session s){return new StatusResponse(s.id,s.status,"TEST",s.expires,s.delivery,pollStatus);}
   private void prune(Instant now){

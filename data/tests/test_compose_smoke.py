@@ -72,6 +72,13 @@ class RuntimePolicyTests(unittest.TestCase):
 
 
 class SharedHttpSmokeTests(unittest.TestCase):
+    def test_registration_check_rejects_a_server_without_cancel_before_create(self):
+        self.assertTrue(callable(getattr(api_smoke, 'check_registration_recovery', None)),
+                        'packaged server must verify the registration recovery contract')
+        with patch.object(api_smoke, 'request', return_value=(404, {}, b'{}')):
+            with self.assertRaises(AssertionError):
+                api_smoke.check_registration_recovery(43127, 'fixture-key')
+
     def test_unconfigured_check_rejects_accidentally_open_api(self):
         with patch.object(api_smoke, 'request', return_value=(200, {}, b'[]')):
             with self.assertRaises(AssertionError):
