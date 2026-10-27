@@ -15,6 +15,7 @@ services:
       PORT: "8080"
       SEOUL_SUBWAY_KEY: "sample"
       FCM_ENABLED: "false"
+      SUBWAY_API_TOKENS: "${SUBWAY_API_TOKENS:-}"
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -Djava.io.tmpdir=/tmp"
     init: true
     restart: "no"

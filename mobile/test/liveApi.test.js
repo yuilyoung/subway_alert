@@ -1,5 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
+const KEY='A'.repeat(43);
 const {validateServerUrl, normalizeResponse, fetchTrains, observationStatus, filterTrains} = require('../src/liveApi');
 
 test('server URLs use https except explicit development loopback addresses', () => {
@@ -36,11 +37,21 @@ test('freshness is based on event timestamp and does not infer future or unknown
 });
 
 test('HTTP errors and malformed payloads do not become train data', async () => {
-  await assert.rejects(fetchTrains('https://example.com', false, async () => ({ok:false,status:503})), /503/);
-  await assert.rejects(fetchTrains('https://example.com', false, async () => ({ok:true,json:async()=>({})})), /형식/);
+  await assert.rejects(fetchTrains('https://example.com', false, async () => ({ok:false,status:503}),KEY), /503/);
+  await assert.rejects(fetchTrains('https://example.com', false, async () => ({ok:true,json:async()=>({})}),KEY), /형식/);
   const response=await fetchTrains('https://example.com', false, async (url) => {
     assert.equal(url,'https://example.com/api/live/trains?line=2');
     return {ok:true,json:async()=>({mode:'LIVE',warning:'',trains:[]})};
-  });
+  },KEY);
   assert.equal(response.mode,'LIVE');
+});
+
+test('train lookup uses the API credential header and refuses redirects',async()=>{
+ let sent;
+ await fetchTrains('https://example.com',false,async(url,options)=>{sent=options;return {ok:true,json:async()=>({mode:'SAMPLE',trains:[]})};},KEY);
+ assert.equal(sent.headers.Authorization,`Bearer ${KEY}`);
+ assert.equal(sent.redirect,'error');
+ let calls=0;
+ await assert.rejects(()=>fetchTrains('https://example.com',false,async()=>{calls++;},''));
+ assert.equal(calls,0);
 });

@@ -11,8 +11,16 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(TrackingController.class)
+@WebMvcTest(value=TrackingController.class,properties="SUBWAY_API_TOKENS=abcdefghijklmnopqrstuvwxyzABCDEF")
+@org.springframework.context.annotation.Import(TrackingControllerTest.AuthDefaults.class)
 class TrackingControllerTest {
+  @org.springframework.boot.test.context.TestConfiguration
+  static class AuthDefaults {
+    @org.springframework.context.annotation.Bean
+    org.springframework.boot.test.autoconfigure.web.servlet.MockMvcBuilderCustomizer authDefaults() {
+      return builder->builder.defaultRequest(get("/").header("Authorization","Bearer abcdefghijklmnopqrstuvwxyzABCDEF"));
+    }
+  }
   @Autowired MockMvc mvc;
   @Autowired ObjectMapper json;
   @Test void capabilityAndDemoLifecycle() throws Exception {

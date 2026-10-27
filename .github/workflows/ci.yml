@@ -42,6 +42,8 @@ jobs:
       - name: Build and test server
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Smoke test packaged API authentication and limits
+        run: python3 deploy/smoke_api_access.py --jar server/target/subway-alert-server-0.1.0.jar
       - name: Run standalone tracking engine tests
         working-directory: server
         run: |
@@ -50,6 +52,28 @@ jobs:
             src/main/java/com/subwayalert/server/domain/TrackingEngine.java \
             src/test/java/com/subwayalert/server/domain/TrackingEngineTest.java
           java -cp /tmp/subway-server-test com.subwayalert.server.domain.TrackingEngineTest
+
+  docker-backend:
+    name: Docker backend runtime and API checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Docker tools
+        run: |
+          docker version --format '{{.Server.Version}}'
+          docker compose version --short
+          python3 --version
+      - name: Build and test the isolated backend container
+        run: python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
+      - name: Upload Docker runtime result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-docker-smoke-${{ github.run_number }}
+          path: artifacts/docker-smoke.json
+          if-no-files-found: error
+          retention-days: 14
 
   android-test-apk:
     # A normal assembleDebug APK generally needs Metro. Build the release
