@@ -72,6 +72,38 @@ def server(jar, token):
                 raise AssertionError('Server log exposed API credential material')
 
 
+def require(condition, message):
+    # Smoke checks must remain active even when Python runs with -O.
+    if not condition:
+        raise AssertionError(message)
+
+
+def check_unconfigured(port):
+    """Check public health and fail-closed access without making provider calls."""
+    require(request(port, '/api/health')[0] == 200, 'public health must remain available')
+    require(request(port, '/api/lines')[0] == 503, 'unconfigured private API must fail closed')
+
+
+def check_keyed(port, token):
+    """Check authentication and quotas using local metadata and invalid demo input."""
+    require(request(port, '/api/health')[0] == 200, 'public health must remain available')
+    require(request(port, '/api/lines')[0] == 401, 'missing key must be rejected')
+    require(request(port, '/api/lines', secrets.token_urlsafe(32))[0] == 401, 'wrong key must be rejected')
+    require(request(port, '/api/lines', token, duplicate=True)[0] == 401, 'duplicate key header must be rejected')
+    status, _, payload = request(port, '/api/lines', token)
+    require(status == 200 and isinstance(json.loads(payload), list), 'valid key must reach API')
+    for _ in range(3):
+        require(request(port, '/api/track', token, 'POST', '{}')[0] == 400, 'invalid demo body must be rejected')
+    status, headers, _ = request(port, '/api/track', token, 'POST', '{}')
+    require(status == 429 and int(headers.get('Retry-After', '0')) > 0, 'creation budget must reject with retry hint')
+    with ThreadPoolExecutor(max_workers=12) as workers:
+        responses = list(workers.map(lambda _: request(port, '/api/lines', token), range(90)))
+    require(any(value[0] == 200 for value in responses), 'normal requests must still succeed')
+    require(any(value[0] == 429 for value in responses), 'burst must reach key budget')
+    require(all(value[0] in (200, 429) for value in responses), 'unexpected burst response')
+    require(all(token.encode() not in value[2] for value in responses), 'API response must not expose key')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jar', type=Path, required=True)
@@ -79,25 +111,10 @@ def main():
     if not args.jar.is_file():
         parser.error('server JAR is missing; run Maven verify first')
     with server(args.jar, '') as port:
-        assert request(port, '/api/health')[0] == 200, 'public health must remain available'
-        assert request(port, '/api/lines')[0] == 503, 'unconfigured private API must fail closed'
+        check_unconfigured(port)
     token = secrets.token_urlsafe(32)
     with server(args.jar, token) as port:
-        assert request(port, '/api/lines')[0] == 401, 'missing key must be rejected'
-        assert request(port, '/api/lines', secrets.token_urlsafe(32))[0] == 401, 'wrong key must be rejected'
-        assert request(port, '/api/lines', token, duplicate=True)[0] == 401, 'duplicate key header must be rejected'
-        status, _, payload = request(port, '/api/lines', token)
-        assert status == 200 and isinstance(json.loads(payload), list), 'valid key must reach API'
-        for _ in range(3):
-            assert request(port, '/api/track', token, 'POST', '{}')[0] == 400, 'invalid demo body must be rejected'
-        status, headers, _ = request(port, '/api/track', token, 'POST', '{}')
-        assert status == 429 and int(headers.get('Retry-After', '0')) > 0, 'creation budget must reject with retry hint'
-        with ThreadPoolExecutor(max_workers=12) as workers:
-            responses = list(workers.map(lambda _: request(port, '/api/lines', token), range(90)))
-        assert any(value[0] == 200 for value in responses), 'normal requests must still succeed'
-        assert any(value[0] == 429 for value in responses), 'burst must reach key budget'
-        assert all(value[0] in (200, 429) for value in responses), 'unexpected burst response'
-        assert all(token.encode() not in value[2] for value in responses), 'API response must not expose key'
+        check_keyed(port, token)
     print('Packaged API smoke: health 200, unconfigured 503, missing/wrong/duplicate key 401, valid key 200, creation/burst 429; no external API calls')
 
 
