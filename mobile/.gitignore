@@ -4,3 +4,6 @@ dist/
 android/
 ios/
 *.log
+
+google-services.json
+*service-account*.json

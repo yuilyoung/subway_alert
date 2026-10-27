@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import MonitorPanel from './MonitorPanel';
 const {fetchTrains, observationStatus, filterTrains}=require('./liveApi');
 const directionLabels={INNER:'내선',OUTER:'외선'};
 const stateLabels={ENTERING:'진입',ARRIVED:'도착',DEPARTED:'출발',PREVIOUS_DEPARTED:'전역 출발'};
@@ -48,6 +49,7 @@ export default function LiveTrains() {
         </TouchableOpacity>;
       })}
     </View>}
+    <MonitorPanel server={server} train={selected} sourceMode={result?.mode} />
   </View>;
 }
 const styles=StyleSheet.create({heading:{fontSize:19,fontWeight:'700',marginTop:24,marginBottom:12,color:'#172b50'},help:{fontSize:12,lineHeight:18,color:'#5a6780',marginVertical:5},input:{backgroundColor:'white',borderColor:'#cbd4e5',borderWidth:1,borderRadius:8,padding:12,marginVertical:8},button:{backgroundColor:'#2854d5',padding:11,borderRadius:8,alignItems:'center'},buttonText:{color:'white',fontWeight:'700'},source:{fontWeight:'700',color:'#273e70',marginTop:12},error:{color:'#a32424',marginTop:8},warning:{color:'#8b5900',lineHeight:19,marginVertical:4},card:{backgroundColor:'white',borderRadius:8,padding:12,marginTop:8,gap:4,borderWidth:1,borderColor:'#e0e5ef'},selected:{borderColor:'#2854d5',borderWidth:2},bold:{fontWeight:'700'},selectedText:{color:'#2854d5',fontWeight:'700'}});

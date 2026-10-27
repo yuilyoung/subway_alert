@@ -37,4 +37,11 @@ class SeoulTrainProviderTest {
     var result=provider.fetch("2"); assertEquals("SAMPLE",result.mode()); assertEquals(2,result.trains().size()); assertTrue(result.warning().contains("5")); assertEquals(1,seen.size()); assertTrue(seen.get(0).getPath().contains("/realtimePosition/0/5/"));
     assertThrows(IllegalArgumentException.class,()->provider.fetch("7"));
   }
+  @Test void sampleFactoryAlwaysUsesOnlyPublicSampleCredential(){
+    var seen=new java.util.ArrayList<URI>();
+    var provider=SeoulTrainProvider.sample(new ObjectMapper(),uri->{seen.add(uri);return RESPONSE;},()->Instant.parse("2026-10-27T12:52:30Z"));
+    assertEquals("SAMPLE",provider.fetch("2").mode());
+    assertEquals("http",seen.get(0).getScheme());
+    assertTrue(seen.get(0).getPath().startsWith("/api/subway/sample/"));
+  }
 }

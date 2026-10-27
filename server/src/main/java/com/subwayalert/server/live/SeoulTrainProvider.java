@@ -39,6 +39,14 @@ public final class SeoulTrainProvider {
   public static SeoulTrainProvider configured(ObjectMapper mapper){
     String configured=System.getenv("SEOUL_SUBWAY_KEY");
     String key=(configured==null || configured.isBlank())?"sample":configured.trim();
+    return create(key,mapper);
+  }
+  /** Test monitoring must never spend a configured private credential's quota. */
+  public static SeoulTrainProvider sample(ObjectMapper mapper){return create("sample",mapper);}
+  static SeoulTrainProvider sample(ObjectMapper mapper,Transport transport,Supplier<Instant> now){
+    return new SeoulTrainProvider("sample",URI.create("http://"+HOST),transport,mapper,now);
+  }
+  private static SeoulTrainProvider create(String key,ObjectMapper mapper){
     URI base=URI.create("sample".equals(key)?"http://"+HOST:"https://"+HOST);
     HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build();
     Transport transport=uri->{
