@@ -1,21 +1,23 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Alert, AppState, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import * as Notifications from 'expo-notifications';
 import LiveTrains from './src/LiveTrains';
+import FavoritePanel from './src/FavoritePanel';
 import {readState,writeState,enableMonitoring,disableMonitoring,requestNotificationPermissions} from './src/background';
 const stations=require('./src/stations');
-const {addFavorite,findRoute}=require('./src/domain');
+const {findRoute}=require('./src/domain');
 Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})});
 const defaults={favorites:[],automation:false,active:null};
 const name=id=>stations.find(s=>s.id===id)?.name || '역 선택';
 function Btn({label,onPress,secondary}) {return <TouchableOpacity onPress={onPress} style={[styles.button,secondary&&styles.secondary]}><Text style={[styles.buttonText,secondary&&styles.secondaryText]}>{label}</Text></TouchableOpacity>}
 export default function App(){
- const [state,setState]=useState(defaults), [from,setFrom]=useState(''),[to,setTo]=useState(''),[query,setQuery]=useState(''),[select,setSelect]=useState('from'),[start,setStart]=useState('07:00'),[end,setEnd]=useState('09:00'),[ready,setReady]=useState(false),[busy,setBusy]=useState(false);
+ const [state,setState]=useState(defaults), [from,setFrom]=useState(''),[to,setTo]=useState(''),[query,setQuery]=useState(''),[select,setSelect]=useState('from'),[ready,setReady]=useState(false),[busy,setBusy]=useState(false);
+ const busyRef=useRef(false);
  const route=findRoute(stations,from,to);
  async function reload(){let s=await readState();setState({...defaults,...s});setReady(true)}
  useEffect(()=>{reload(); const sub=AppState.addEventListener('change',v=>{if(v==='active') reload()});return ()=>sub.remove()},[]);
- async function update(fn){const current={...defaults,...await readState()};const next=fn(current);await writeState(next);setState(next)}
- async function run(fn){if(!ready||busy)return;setBusy(true);try{await fn()}catch(e){Alert.alert('확인',e.message || '처리 중 오류가 발생했습니다.')}finally{setBusy(false)}}
+ async function update(fn){const current={...defaults,...await readState()};const next=fn(current);await writeState(next);setState(next);return next}
+ async function run(fn){if(!ready||busyRef.current)return;busyRef.current=true;setBusy(true);try{await fn()}catch(e){Alert.alert('확인',e.message || '처리 중 오류가 발생했습니다.')}finally{busyRef.current=false;setBusy(false)}}
  const validate=()=>{if(!route)throw Error('서로 다른 출발역과 도착역을 선택하세요.');};
  async function begin(){return run(async()=>{
   validate();
@@ -30,8 +32,7 @@ export default function App(){
   Alert.alert('감시 시작 (데모)','상태 표시줄의 위치 서비스 알림을 유지합니다. GPS와 샘플 좌표가 실제 열차를 확인하지 못하므로 실제 하차에 의존하지 마세요.');
  })}
  async function stop(){return run(async()=>{await update(s=>({...s,active:null,automation:false}));await disableMonitoring();})}
- async function saveFavorite(){return run(async()=>{validate();if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end)||start===end)throw Error('시간은 HH:MM 형식이며 시작과 종료가 달라야 합니다.');await update(s=>({...s,favorites:addFavorite(s.favorites,{id:String(Date.now()),from,to,enabled:true,schedule:{days:[1,2,3,4,5],start,end}})}));})}
- async function toggleAuto(){return run(async()=>{if(!state.automation){if(!state.favorites.length)throw Error('먼저 즐겨찾기를 등록하세요.');await enableMonitoring();await update(s=>({...s,automation:true}));Alert.alert('출퇴근 감시 시작 (데모)','사용자가 앱을 연 상태에서 서비스가 시작됩니다. 지정한 평일 시간에 출발역 근처를 감지하면 자동 탑승 확인 알림을 보냅니다. 앱에서 직접 감시를 시작해야 합니다.');}else {await update(s=>({...s,automation:false}));if(!state.active)await disableMonitoring();}})}
+ async function toggleAuto(){return run(async()=>{if(!state.automation){if(!state.favorites.length)throw Error('먼저 즐겨찾기를 등록하세요.');await enableMonitoring();await update(s=>({...s,automation:true}));Alert.alert('출퇴근 감시 시작 (데모)','사용자가 앱을 연 상태에서 서비스가 시작됩니다. 즐겨찾기에 지정한 요일·시간에 출발역 근처를 감지하면 자동 탑승 확인 알림을 보냅니다. 앱에서 직접 감시를 시작해야 합니다.');}else {await update(s=>({...s,automation:false}));if(!state.active)await disableMonitoring();}})}
  return <SafeAreaView style={styles.screen}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
  <Text style={styles.title}>지하철 하차 알림</Text><Text style={styles.subtitle}>화면이 꺼져도 경로를 감시하는 Android 데모</Text>
  <View style={styles.warning}><Text style={styles.warningText}>데모 전용 · 서울 2호선 일부 5개 역과 검증되지 않은 대략 좌표입니다. 지하 GPS는 끊길 수 있으며 열차 조회와 알림이 연결되지 않아 실제 하차 알림으로 사용하지 마세요.</Text></View>
@@ -42,10 +43,7 @@ export default function App(){
  {route&&<Text style={styles.info}>{route.from.name} → {route.to.name} · {route.count}정거장 · 이전 역 {route.previous.name}</Text>}
  <View style={styles.row}><Btn label="감시 시작" onPress={begin}/><Btn secondary label="전체 감시 중지" onPress={stop}/></View>
  <Text style={styles.status}>{state.active?`감시 중: ${name(state.active.from)} → ${name(state.active.to)}`:'현재 진행 중인 경로 없음'}</Text>
- <Text style={styles.heading}>2. 출퇴근 즐겨찾기 ({state.favorites.length}/5)</Text>
- <Text>평일 자동 감지 시간 (기기 현지 시간)</Text><View style={styles.row}><TextInput style={[styles.input,styles.time]} value={start} onChangeText={setStart} placeholder="07:00"/><Text>~</Text><TextInput style={[styles.input,styles.time]} value={end} onChangeText={setEnd} placeholder="09:00"/></View>
- <Btn secondary label="선택 경로 즐겨찾기에 추가" onPress={saveFavorite}/>
- {state.favorites.map(f=><View key={f.id} style={styles.card}><Text style={styles.bold}>{name(f.from)} → {name(f.to)}</Text><Text>평일 {f.schedule.start}–{f.schedule.end} · {f.enabled?'자동 감지 사용':'자동 감지 꺼짐'}</Text><View style={styles.row}><Btn secondary label="선택" onPress={()=>{setFrom(f.from);setTo(f.to)}}/><Btn secondary label={f.enabled?'자동 끄기':'자동 켜기'} onPress={()=>run(()=>update(s=>({...s,favorites:s.favorites.map(x=>x.id===f.id?{...x,enabled:!x.enabled}:x)})))}/><Btn secondary label="삭제" onPress={()=>run(()=>update(s=>({...s,favorites:s.favorites.filter(x=>x.id!==f.id)})))}/></View></View>)}
+ <FavoritePanel favorites={state.favorites} route={route} disabled={!ready||busy} run={run} onSelect={f=>{setFrom(f.from);setTo(f.to)}} onUpdate={update} onSaved={setState} readState={readState} writeState={writeState}/>
  <Btn label={state.automation?'출퇴근 감지 알림 끄기':'출퇴근 감지 알림 켜기'} onPress={toggleAuto}/><Text style={styles.small}>앱에서 감시를 켜야 작동하며 상시 위치 알림이 표시됩니다. 재부팅·강제 종료·절전 정책 및 위치 신호에 따라 중단되거나 지연될 수 있습니다.</Text>
  <Text style={styles.heading}>3. 역 안내</Text>
  {[{id:from,label:'출발'},{id:to,label:'도착'}].filter(x=>x.id).map(({id,label})=><View key={label+id} style={styles.card}><Text style={styles.bold}>{label} · {name(id)}</Text><Text>빠른 환승 · 화장실 · 편의시설 · 개찰구 · 출구: 확인된 정보 없음</Text></View>)}
