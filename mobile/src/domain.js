@@ -1,7 +1,31 @@
+const { normalizeSchedule, scheduleOccurrence } = require('./commute');
+
 function addFavorite(favorites, favorite) {
   if (favorites.some(f => f.from === favorite.from && f.to === favorite.to)) throw new Error('이미 등록된 경로입니다.');
   if (favorites.length >= 5) throw new Error('즐겨찾기는 최대 5개입니다.');
   return [...favorites, favorite];
+}
+function saveFavorite(favorites, draft, editingId = null) {
+  if (!draft || typeof draft.from !== 'string' || !draft.from.trim() ||
+      typeof draft.to !== 'string' || !draft.to.trim() || draft.from === draft.to) {
+    throw new Error('서로 다른 출발역과 도착역을 선택해 주세요.');
+  }
+  const schedule = normalizeSchedule(draft.schedule);
+  const editing = editingId !== null;
+  const index = editing ? favorites.findIndex(favorite => favorite.id === editingId) : -1;
+  if (editing && index < 0) throw new Error('수정할 즐겨찾기를 찾을 수 없습니다.');
+  if (favorites.some((favorite, i) => i !== index && favorite.from === draft.from && favorite.to === draft.to)) {
+    throw new Error('이미 등록된 경로입니다.');
+  }
+  if (editing) {
+    return favorites.map((favorite, i) => i === index
+      ? { ...favorite, from: draft.from, to: draft.to, schedule }
+      : favorite);
+  }
+  if (typeof draft.id !== 'string' || !draft.id.trim()) throw new Error('즐겨찾기 ID가 필요합니다.');
+  if (favorites.some(favorite => favorite.id === draft.id)) throw new Error('이미 등록된 즐겨찾기 ID입니다.');
+  if (favorites.length >= 5) throw new Error('즐겨찾기는 최대 5개입니다.');
+  return [...favorites, { ...draft, schedule, enabled: draft.enabled === undefined ? true : draft.enabled }];
 }
 function findRoute(stations, from, to) {
   const a=stations.findIndex(s=>s.id===from), b=stations.findIndex(s=>s.id===to);
@@ -19,13 +43,6 @@ function shouldAlert({target, point, now, wasOutside}) {
   return distanceMeters(target,point)<=180;
 }
 function matchesSchedule(schedule,date) {
-  if (!schedule || !Array.isArray(schedule.days) || !/^\d{2}:\d{2}$/.test(schedule.start || '') || !/^\d{2}:\d{2}$/.test(schedule.end || '')) return false;
-  const parse=s=>Number(s.slice(0,2))*60+Number(s.slice(3));
-  const valid=s=>Number(s.slice(0,2))<24 && Number(s.slice(3))<60;
-  if (!valid(schedule.start)||!valid(schedule.end)) return false;
-  const start=parse(schedule.start), end=parse(schedule.end), now=date.getHours()*60+date.getMinutes();
-  if (start===end) return false;
-  if (end>start) return schedule.days.includes(date.getDay()) && now>=start && now<end;
-  return (now>=start && schedule.days.includes(date.getDay())) || (now<end && schedule.days.includes((date.getDay()+6)%7));
+  return scheduleOccurrence(schedule,date) !== null;
 }
-module.exports={addFavorite,findRoute,distanceMeters,shouldAlert,matchesSchedule};
+module.exports={addFavorite,saveFavorite,findRoute,distanceMeters,shouldAlert,matchesSchedule};
