@@ -18,31 +18,43 @@ PR 생성·수정과 모든 push에서 CI를 실행합니다. main 병합도 pus
 | Android | 네이티브 lintRelease, JS 내장 ARM64 시험 APK 빌드·서명 검사 |
 | CI gate | 모든 선행 작업이 success일 때만 성공; 실패·취소·skip이면 실패 |
 
+최종 게이트는 정확한 6개 필수 검사 결과를 검증합니다. 빈 입력·누락·추가 검사·잘못된 형식도 실패하며 Actions Summary에 각 판정을 표시합니다. workflow 의존성과 같은 검사 집합을 유지하는 계약 테스트를 실행합니다.
+
 CI는 포맷을 자동 수정하거나 오류를 무시하지 않습니다. 로컬에서 수정하고 다시 제출합니다. 생성 Android/Expo·node_modules·target 디렉터리는 소스 포맷 대상이 아닙니다. 이 구성은 취약점 전수 검사나 실기기 동작 보장을 뜻하지 않습니다.
+
+읽기 전용 정적 검사 명령은 다음과 같습니다. Node 의존성·Maven·actionlint를 설치하고 Python 도구를 준비한 뒤 실행합니다. 기본 `all`은 static과 server 그룹을 모두 검사합니다.
 
 ```sh
 npm ci --prefix mobile
-npm run lint --prefix mobile
-npm run format:check --prefix mobile
+python3 -m pip install -r requirements-quality.txt
+python3 deploy/check_quality.py --negative-controls
+mvn -f server/pom.xml verify
+python3 -m unittest discover -s data/tests -v
+```
+
+`--group static`은 ESLint·Prettier·Ruff·actionlint, `--group server`는 Spotless·PMD만 검사합니다. `--maven`과 `--actionlint`로 설치한 실행 파일 경로를 지정할 수 있습니다. `--negative-controls`는 stdin·임시 디렉터리에 의도적인 오류를 넣고 정확한 진단과 종료 코드 1을 확인합니다. 실행 파일 누락·설정 오류는 정상 차단으로 간주하지 않습니다. 개발 소스는 바꾸지 않습니다.
+
+포맷을 자동 수정하려는 경우에만 아래 명령을 별도로 실행하고 변경을 검토합니다.
+
+```sh
 npm run format --prefix mobile
 mvn -f server/pom.xml spotless:apply
-mvn -f server/pom.xml verify
-python3 -m pip install -r requirements-quality.txt
-python3 -m ruff check deploy data
-python3 -m ruff format --check deploy data
-python3 -m unittest discover -s data/tests -v
+python3 -m ruff check --fix deploy data
+python3 -m ruff format deploy data
 ```
 
 ## 산출물과 승격
 
 | Artifact | 내용 | 보관 |
 | --- | --- | --- |
-| backend-release-소스SHA | 검증한 image.tar, manifest, 체크섬, staging Compose, 배포 도구 | 30일 |
-| backend-jar-소스SHA | 실행 JAR | 14일 |
-| server-reports-소스SHA | 테스트·PMD 결과 | 14일 |
-| android-lint-소스SHA | 네이티브 Android lint 결과 | 14일 |
-| backend-docker-smoke-실행번호 | 비밀 없는 Docker·배포/롤백 검사 결과 | 14일 |
-| subway-alert-test-arm64-실행번호 | 내부 시험 APK, SHA256SUMS, 시험 빌드 안내 | 14일 |
+| backend-release-소스SHA-attempt-회차 | 검증한 image.tar, manifest, 체크섬, staging Compose, 배포 도구 | 30일 |
+| backend-jar-소스SHA-attempt-회차 | 실행 JAR | 14일 |
+| server-reports-소스SHA-attempt-회차 | 테스트·PMD 결과 | 14일 |
+| android-lint-소스SHA-attempt-회차 | 네이티브 Android lint 결과 | 14일 |
+| backend-docker-smoke-실행번호-attempt-회차 | 비밀 없는 Docker·배포/롤백 검사 결과 | 14일 |
+| subway-alert-test-arm64-실행번호-attempt-회차 | 내부 시험 APK, SHA256SUMS, 시험 빌드 안내 | 14일 |
+
+재실행 산출물은 `github.run_attempt` 접미사로 구분하고 이전 회차를 덮어쓰지 않습니다. CD는 GitHub API로 확인한 최신 실행 회차의 배포 묶음만 선택합니다. 일부 job만 재실행해 최신 회차 배포 묶음이 없으면 이전 회차로 대체하지 않고 실패합니다. 배포를 준비하려면 전체 CI를 재실행하세요.
 
 Docker 이미지는 한 번 빌드한 불변 image ID로 smoke 검사·저장·배포합니다. CD에서 재빌드하지 않습니다. manifest에 source SHA·CI run ID·image ID·파일 해시를 기록하며 다른 출처나 변조를 거절합니다. Artifact 자체의 자동 무결성 경고에 의존하지 않고 파일 해시를 명시적으로 검사합니다. 보관 기한이 지난 run은 다시 선택할 수 없으므로 새 main CI를 실행할 수 있는 변경을 제출해야 합니다. 장기 릴리스 보존은 별도 registry/release 정책이 필요합니다.
 

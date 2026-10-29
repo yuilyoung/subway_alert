@@ -139,3 +139,5 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 PR과 push에서 ESLint·Prettier, Java Spotless·PMD, Python Ruff, actionlint 및 기존 테스트를 검사합니다. Android 네이티브 lint와 시험 APK, 실행 JAR·테스트 보고서, 동일 Docker 이미지의 배포 묶음을 보관합니다. 최종 `CI gate`는 모든 작업의 성공을 요구합니다.
 
 [CI/CD 설정 안내](docs/cicd.md)에 명령·산출물·main 보호 규칙·staging SSH 설정·배포 후 검사·롤백을 설명했습니다. CD는 성공한 main push CI 산출물만 수동 승격합니다. 서버·SSH·environment 승인·main 필수 검사 규칙은 관리자 설정 전이며, SAMPLE staging 준비와 실제 운영 배포를 구분합니다. Play 정식 서명·게시도 아직 연결하지 않았습니다.
+
+CI 재점검 보완: 최종 게이트는 빈 결과·필수 검사 누락도 거절하며, 산출물은 실행 회차별로 보존합니다. 로컬의 읽기 전용 정적 검사와 분석기 오류 차단 확인은 `python3 deploy/check_quality.py --negative-controls`로 실행합니다. 도구 설치와 그룹별 사용법은 [CI/CD 안내](docs/cicd.md)를 확인하세요.

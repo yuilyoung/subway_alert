@@ -25,15 +25,7 @@ jobs:
         run: |
           npm ci --prefix mobile
           python3 -m pip install --requirement requirements-quality.txt
-      - name: JavaScript lint (warnings fail)
-        run: npm run lint --prefix mobile
-      - name: JavaScript formatting
-        run: npm run format:check --prefix mobile
-      - name: Python lint and formatting
-        run: |
-          python3 -m ruff check deploy data
-          python3 -m ruff format --check deploy data
-      - name: Validate Actions workflows
+      - name: Install checksum-pinned actionlint
         shell: bash
         run: |
           set -euo pipefail
@@ -42,11 +34,13 @@ jobs:
             --output /tmp/actionlint.tar.gz
           echo '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  /tmp/actionlint.tar.gz' | sha256sum --check
           tar --no-same-owner -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
-          /tmp/actionlint -color
+      - name: Check static quality and deliberate failure controls
+        run: python3 deploy/check_quality.py --group static --negative-controls --actionlint /tmp/actionlint
 
   mobile-domain-and-data:
     needs: static-analysis
     name: Mobile domain and sample data
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +62,7 @@ jobs:
   server:
     needs: static-analysis
     name: Server build and tests
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,11 +74,13 @@ jobs:
       - name: Build and test server
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Verify Java formatter and lint reject deliberate violations
+        run: python3 deploy/check_quality.py --group server --negative-controls
       - name: Preserve server test and static reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: server-reports-${{ github.sha }}
+          name: server-reports-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
             server/target/surefire-reports/
             server/target/pmd.xml
@@ -93,7 +90,7 @@ jobs:
       - name: Preserve packaged server
         uses: actions/upload-artifact@v4
         with:
-          name: backend-jar-${{ github.sha }}
+          name: backend-jar-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: server/target/subway-alert-server-0.1.0.jar
           if-no-files-found: error
           retention-days: 14
@@ -207,7 +204,7 @@ jobs:
       - name: Preserve verified backend release
         uses: actions/upload-artifact@v4
         with:
-          name: backend-release-${{ github.sha }}
+          name: backend-release-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: artifacts/release/
           if-no-files-found: error
           retention-days: 30
@@ -215,7 +212,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-docker-smoke-${{ github.run_number }}
+          name: backend-docker-smoke-${{ github.run_number }}-attempt-${{ github.run_attempt }}
           path: |
             artifacts/docker-smoke.json
             artifacts/release-smoke.json
@@ -251,7 +248,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-lint-${{ github.sha }}
+          name: android-lint-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: mobile/android/app/build/reports/lint-results-release.*
           if-no-files-found: warn
           retention-days: 14
@@ -282,27 +279,20 @@ jobs:
       - name: Upload internal test APK
         uses: actions/upload-artifact@v4
         with:
-          name: subway-alert-test-arm64-${{ github.run_number }}
+          name: subway-alert-test-arm64-${{ github.run_number }}-attempt-${{ github.run_attempt }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
 
   ci-gate:
     name: CI gate
+    timeout-minutes: 5
     if: always()
     needs: [static-analysis, mobile-domain-and-data, server, postgres-durability, docker-backend, android-test-apk]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Require every validation and artifact job to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          results = json.loads(os.environ['RESULTS'])
-          failed = [name for name, job in results.items() if job['result'] != 'success']
-          if failed:
-              raise SystemExit('CI gate failed: ' + ', '.join(failed))
-          print('Every required validation and artifact job passed.')
-          PY
+        run: python3 deploy/check_ci_gate.py

@@ -1,7 +1,10 @@
 """Reject untrusted CI runs before their artifacts reach a deployment host."""
 
 import copy
+import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,6 +15,7 @@ from ci_provenance import trusted_source
 def valid_run():
     return {
         "id": 123,
+        "run_attempt": 1,
         "status": "completed",
         "conclusion": "success",
         "event": "push",
@@ -24,6 +28,32 @@ def valid_run():
 
 
 class ProvenanceTests(unittest.TestCase):
+    def test_invalid_or_missing_attempt_is_rejected(self):
+        for attempt in (None, 0, -1, True, "2", 2.0):
+            with self.subTest(attempt=attempt), self.assertRaises(ValueError):
+                trusted_source({**valid_run(), "run_attempt": attempt}, 123)
+        run = valid_run()
+        del run["run_attempt"]
+        with self.assertRaises(ValueError):
+            trusted_source(run, 123)
+
+    def test_cli_selects_exact_latest_attempt_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            response = Path(directory) / "run.json"
+            response.write_text(json.dumps({**valid_run(), "run_attempt": 2}))
+            command = Path(__file__).resolve().parents[2] / "deploy/ci_provenance.py"
+            result = subprocess.run(
+                [sys.executable, str(command), str(response), "--run-id", "123"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertIn(
+                "artifact_name=backend-release-" + "a" * 40 + "-attempt-2\n", result.stdout
+            )
+            self.assertIn("run_attempt=2\n", result.stdout)
+
     def test_successful_main_push_has_exact_artifact_identity(self):
         self.assertEqual(trusted_source(valid_run(), 123), "a" * 40)
 

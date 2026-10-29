@@ -13,6 +13,8 @@ def trusted_source(run, run_id):
     """Only completed successful main pushes from our CI may be promoted."""
     if type(run_id) is not int or run_id <= 0 or not isinstance(run, dict):
         raise ValueError("Untrusted CI run")
+    if type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0:
+        raise ValueError("Invalid CI run attempt")
     required = {
         "id": run_id,
         "status": "completed",
@@ -39,11 +41,13 @@ def main():
     parser.add_argument("--run-id", type=int, required=True)
     args = parser.parse_args()
     try:
-        source = trusted_source(json.loads(args.response.read_text()), args.run_id)
+        run = json.loads(args.response.read_text())
+        source = trusted_source(run, args.run_id)
     except (OSError, ValueError, TypeError):
         parser.exit(1, "CI run rejected; require successful main push from CI.\n")
     print(f"source_sha={source}")
-    print(f"artifact_name=backend-release-{source}")
+    print(f"run_attempt={run['run_attempt']}")
+    print(f"artifact_name=backend-release-{source}-attempt-{run['run_attempt']}")
 
 
 if __name__ == "__main__":
