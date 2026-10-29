@@ -12,20 +12,29 @@ function normalizeSchedule(schedule) {
     }
     days.add(day);
   }
-  const validTime = value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  const validTime = (value) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
   if (!validTime(schedule.start) || !validTime(schedule.end)) {
     throw new Error('시간을 HH:MM 24시간 형식으로 입력해 주세요.');
   }
   if (schedule.start === schedule.end) throw new Error('시작과 종료 시간을 다르게 설정해 주세요.');
-  return { days: DAY_ORDER.filter(day => days.has(day)), start: schedule.start, end: schedule.end };
+  return {
+    days: DAY_ORDER.filter((day) => days.has(day)),
+    start: schedule.start,
+    end: schedule.end,
+  };
 }
 
 function scheduleOccurrence(schedule, date) {
   if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return null;
   let normalized;
-  try { normalized = normalizeSchedule(schedule); } catch { return null; }
-  const minutes = value => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
-  const start = minutes(normalized.start), end = minutes(normalized.end);
+  try {
+    normalized = normalizeSchedule(schedule);
+  } catch {
+    return null;
+  }
+  const minutes = (value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+  const start = minutes(normalized.start),
+    end = minutes(normalized.end);
   const current = date.getHours() * 60 + date.getMinutes();
   const startDate = new Date(date.getTime());
   if (start < end) {
@@ -37,15 +46,19 @@ function scheduleOccurrence(schedule, date) {
     return null;
   }
   if (!normalized.days.includes(startDate.getDay())) return null;
-  const pad = value => String(value).padStart(2, '0');
+  const pad = (value) => String(value).padStart(2, '0');
   const day = `${String(startDate.getFullYear()).padStart(4, '0')}-${pad(startDate.getMonth() + 1)}-${pad(startDate.getDate())}`;
   return `${day}|${normalized.start}|${normalized.end}`;
 }
 
 function formatSchedule(schedule) {
   let normalized;
-  try { normalized = normalizeSchedule(schedule); } catch { return '시간 조건 확인 필요'; }
-  return `${normalized.days.map(day => DAY_LABELS[day]).join('·')} ${normalized.start}–${normalized.end}`;
+  try {
+    normalized = normalizeSchedule(schedule);
+  } catch {
+    return '시간 조건 확인 필요';
+  }
+  return `${normalized.days.map((day) => DAY_LABELS[day]).join('·')} ${normalized.start}–${normalized.end}`;
 }
 
 module.exports = { normalizeSchedule, scheduleOccurrence, formatSchedule };

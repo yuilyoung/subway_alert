@@ -13,7 +13,7 @@
 | 운영 백엔드 호스트 | API·스케줄러 24시간 실행 | 상시 실행 Linux 서버 + Docker | VPS 업체·리전·요금 미선정, 서버 미생성 |
 | PostgreSQL / Supabase | TEST 등록 기록 저장 / 향후 운영 DB | 선택형 로컬 PostgreSQL, 클라우드는 Supabase 목표 | 로컬 저장 구현, Supabase 프로젝트 미확정·미적용 |
 | Firebase FCM | Android 원격 푸시 전달 | 시험 알림 전송 코드 구현 | 실제 자격 증명·기기 수신 미검증 |
-| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | CI #17의 시험 APK 성공, CI #20의 Docker 작업 성공 |
+| GitHub Actions | 정적 분석·테스트·시험 APK·배포 묶음 생성 | formatter/lint, 최종 CI gate, 수동 staging CD | 관리자 병합 제한·SSH 호스트·승인 설정은 미적용 |
 | Google Play | 앱 설치·업데이트 유통 | Android 정식 배포처 | 계정·앱 등록·심사 미진행 |
 | APK 직접 설치 | 소수 개발자의 기기 시험 | 정식 출시 전 내부 시험 | 독립 ARM64 시험 APK 빌드·서명 검사 완료 |
 
@@ -133,3 +133,9 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 선택형 DB 저장 변경의 실제 로컬 검사와 CI 범위는 [영속 저장 검증 기록](docs/verification-durability.md)에 구분합니다.
 
 즐겨찾기는 월~일 중 원하는 요일과 시간대를 지정하고 기존 항목의 **요일·시간 수정**으로 편집합니다. 일요일 23:00–01:00처럼 자정을 넘으면 시작 요일 기준이며 같은 시간대의 제안을 자정 전후로 중복 요청하지 않습니다. 저장 전 초안은 기존 감지 조건에 반영되지 않습니다. [출퇴근 조건 사용법과 검증 범위](docs/commute-schedules.md)를 참고하세요. 외부 API 키 없이 사용하는 로컬 데모 기능이며 실제 자동 탑승·하차 판정은 아닙니다.
+
+## CI/CD 품질 게이트
+
+PR과 push에서 ESLint·Prettier, Java Spotless·PMD, Python Ruff, actionlint 및 기존 테스트를 검사합니다. Android 네이티브 lint와 시험 APK, 실행 JAR·테스트 보고서, 동일 Docker 이미지의 배포 묶음을 보관합니다. 최종 `CI gate`는 모든 작업의 성공을 요구합니다.
+
+[CI/CD 설정 안내](docs/cicd.md)에 명령·산출물·main 보호 규칙·staging SSH 설정·배포 후 검사·롤백을 설명했습니다. CD는 성공한 main push CI 산출물만 수동 승격합니다. 서버·SSH·environment 승인·main 필수 검사 규칙은 관리자 설정 전이며, SAMPLE staging 준비와 실제 운영 배포를 구분합니다. Play 정식 서명·게시도 아직 연결하지 않았습니다.

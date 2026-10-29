@@ -1,0 +1,129 @@
+name: Deploy staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful main push CI run ID to promote (no rebuild)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: subway-alert-staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  verify-source:
+    name: Verify trusted main CI source
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      artifact_name: ${{ steps.source.outputs.artifact_name }}
+    steps:
+      - name: Require main workflow dispatch
+        env:
+          SELECTED_REF: ${{ github.ref }}
+        run: test "$SELECTED_REF" = refs/heads/main
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Fetch selected run metadata
+        uses: actions/github-script@v7
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        with:
+          script: |
+            const id = process.env.CI_RUN_ID;
+            if (!/^[1-9][0-9]{0,14}$/.test(id)) throw new Error('Invalid CI run ID');
+            const {data} = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(id),
+            });
+            require('fs').writeFileSync('ci-run.json', JSON.stringify(data));
+      - name: Reject PR, failed, skipped or foreign artifacts
+        id: source
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: python3 deploy/ci_provenance.py ci-run.json --run-id "$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Promote verified image to staging
+    needs: verify-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    env:
+      SOURCE_SHA: ${{ needs.verify-source.outputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+    steps:
+      - name: Require explicit staging enablement
+        env:
+          ENABLED: ${{ vars.STAGING_DEPLOY_ENABLED }}
+        run: |
+          if [ "$ENABLED" != true ]; then
+            echo 'Configure staging environment, approval, host and SSH secrets; then enable STAGING_DEPLOY_ENABLED.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-source.outputs.source_sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.verify-source.outputs.artifact_name }}
+          path: release
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify exact manifest, source, run and all file checksums
+        run: python3 deploy/release.py verify --bundle release --source-sha "$SOURCE_SHA" --run-id "$CI_RUN_ID"
+      - name: Transfer and deploy with pinned SSH host identity
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          SSH_PORT: ${{ secrets.STAGING_SSH_PORT }}
+          SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/subway-staging-ssh"
+          export SUBWAY_SSH_DIR="$ssh_dir"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          host = os.environ['SSH_HOST']
+          user = os.environ['SSH_USER']
+          port = os.environ['SSH_PORT']
+          if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', host):
+              raise SystemExit('Invalid staging host (DNS or IPv4 required).')
+          if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}', user):
+              raise SystemExit('Invalid staging SSH user.')
+          if not re.fullmatch(r'[0-9]{1,5}', port) or not 1 <= int(port) <= 65535:
+              raise SystemExit('Invalid staging SSH port.')
+          root = Path(os.environ['SUBWAY_SSH_DIR'])
+          root.mkdir(mode=0o700)
+          for key, name in [('SSH_PRIVATE_KEY', 'key'), ('SSH_KNOWN_HOSTS', 'known_hosts')]:
+              value = os.environ[key]
+              if not value.strip():
+                  raise SystemExit('Missing staging SSH credential or pinned host key.')
+              with (root / name).open('x', opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
+                  stream.write(value.rstrip() + '\n')
+          PY
+          # Never log private keys, known-host content, remote env or container logs.
+          ssh-keygen -l -f "$ssh_dir/known_hosts" > /dev/null
+          opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 -o "UserKnownHostsFile=$ssh_dir/known_hosts" -i "$ssh_dir/key")
+          target="$SSH_USER@$SSH_HOST"
+          incoming="/srv/subway-alert/incoming/$SOURCE_SHA-$CI_RUN_ID"
+          ssh "${opts[@]}" -p "$SSH_PORT" "$target" \
+            "test -d /srv/subway-alert && mkdir -p -m 700 '$incoming'" > /dev/null 2>&1
+          scp "${opts[@]}" -P "$SSH_PORT" \
+            release/image.tar release/compose.staging.yaml release/release.py release/manifest.json release/SHA256SUMS \
+            "$target:$incoming/" > /dev/null 2>&1
+          ssh "${opts[@]}" -p "$SSH_PORT" "$target" \
+            "cd /srv/subway-alert && python3 '$incoming/release.py' hostdeploy --bundle '$incoming' --source-sha '$SOURCE_SHA' --run-id '$CI_RUN_ID'" \
+            > /dev/null 2>&1
+          echo "Staging deployment and readiness checks passed for $SOURCE_SHA."

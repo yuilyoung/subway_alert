@@ -8,19 +8,35 @@ import java.util.UUID;
 public interface MonitorReceiptStore extends AutoCloseable {
   /** Atomically prune retained receipts, stop tracking and replace SENDING with UNKNOWN. */
   List<MonitorReceipt> restore(Instant now);
+
   void save(MonitorReceipt receipt);
+
   void delete(UUID id);
+
   void checkAvailable();
-  @Override void close();
+
+  @Override
+  void close();
 
   final class Unavailable extends RuntimeException {
-    public Unavailable(){super("Monitor storage unavailable");}
+    public Unavailable() {
+      super("Monitor storage unavailable");
+    }
   }
-  static MonitorReceiptStore memory(){return new MonitorReceiptStore(){
-    public List<MonitorReceipt> restore(Instant now){return List.of();}
-    public void save(MonitorReceipt receipt){}
-    public void delete(UUID id){}
-    public void checkAvailable(){}
-    public void close(){}
-  };}
+
+  static MonitorReceiptStore memory() {
+    return new MonitorReceiptStore() {
+      public List<MonitorReceipt> restore(Instant now) {
+        return List.of();
+      }
+
+      public void save(MonitorReceipt receipt) {}
+
+      public void delete(UUID id) {}
+
+      public void checkAvailable() {}
+
+      public void close() {}
+    };
+  }
 }

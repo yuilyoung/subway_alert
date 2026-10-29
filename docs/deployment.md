@@ -105,3 +105,7 @@ Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하�
 ## 선택형 PostgreSQL 등록 기록
 
 기본 Compose는 메모리 모드입니다. `compose.postgres.yaml`을 추가하면 외부 계정 없이 로컬 PostgreSQL 17을 실행하고 TEST 등록·취소 기록을 보존합니다. DB를 호스트 포트로 게시하지 않으며, 볼륨은 일반 `down` 뒤 유지됩니다. `down -v`는 기록을 지우므로 일반 중지 절차에서 사용하지 않습니다. 명령과 비밀 생성·재시작·장애 복구는 [PostgreSQL 안내](durable-receipts.md)를 따릅니다.
+
+## CI 배포 산출물과 staging CD
+
+[CI/CD 안내](cicd.md)에 formatter/lint·최종 게이트·JAR/시험 APK·검증한 Docker 이미지 묶음·출처 검사·SSH·배포 후 검사·롤백 구성을 설명합니다. `deploy/compose.staging.yaml`은 기존 로컬 Compose와 별개이며 `release.py`가 검증한 불변 이미지로 SAMPLE·FCM 비활성·메모리 staging만 실행합니다. 호스트와 키는 생성하지 않았으며 관리자 보호 규칙과 environment 승인도 미적용입니다.

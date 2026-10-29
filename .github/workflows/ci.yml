@@ -9,7 +9,43 @@ permissions:
   contents: read
 
 jobs:
+  static-analysis:
+    name: Formatter, lint and workflow validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned quality tools
+        run: |
+          npm ci --prefix mobile
+          python3 -m pip install --requirement requirements-quality.txt
+      - name: JavaScript lint (warnings fail)
+        run: npm run lint --prefix mobile
+      - name: JavaScript formatting
+        run: npm run format:check --prefix mobile
+      - name: Python lint and formatting
+        run: |
+          python3 -m ruff check deploy data
+          python3 -m ruff format --check deploy data
+      - name: Validate Actions workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            --output /tmp/actionlint.tar.gz
+          echo '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  /tmp/actionlint.tar.gz' | sha256sum --check
+          tar --no-same-owner -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -color
+
   mobile-domain-and-data:
+    needs: static-analysis
     name: Mobile domain and sample data
     runs-on: ubuntu-latest
     steps:
@@ -30,6 +66,7 @@ jobs:
         run: python3 -m unittest discover -s data/tests -v
 
   server:
+    needs: static-analysis
     name: Server build and tests
     runs-on: ubuntu-latest
     steps:
@@ -42,6 +79,24 @@ jobs:
       - name: Build and test server
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Preserve server test and static reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-reports-${{ github.sha }}
+          path: |
+            server/target/surefire-reports/
+            server/target/pmd.xml
+            server/target/site/pmd.html
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve packaged server
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar-${{ github.sha }}
+          path: server/target/subway-alert-server-0.1.0.jar
+          if-no-files-found: error
+          retention-days: 14
       - name: Smoke test packaged API authentication and limits
         run: python3 deploy/smoke_api_access.py --jar server/target/subway-alert-server-0.1.0.jar
       - name: Run standalone tracking engine tests
@@ -54,6 +109,7 @@ jobs:
           java -cp /tmp/subway-server-test com.subwayalert.server.domain.TrackingEngineTest
 
   postgres-durability:
+    needs: static-analysis
     name: Real PostgreSQL durable receipt integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -88,7 +144,7 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress verify
       - name: Verify real receipt durability and storage outage behavior
         env:
-          TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+          TEST_POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
         # Construct the URL inside the process: Actions otherwise prints step
         # environment values. Mask it before launching any child process.
         run: |
@@ -112,6 +168,7 @@ jobs:
           PY
 
   docker-backend:
+    needs: static-analysis
     name: Docker backend runtime and API checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -122,18 +179,51 @@ jobs:
           docker version --format '{{.Server.Version}}'
           docker compose version --short
           python3 --version
-      - name: Build and test the isolated backend container
-        run: python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
+      - name: Build one immutable release candidate
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "subway-alert-ci:$GITHUB_SHA" server
+          image_id=$(docker image inspect --format '{{.Id}}' "subway-alert-ci:$GITHUB_SHA")
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+      - name: Test the exact release image
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        run: python3 deploy/smoke_compose.py --image "$IMAGE_ID" --report artifacts/docker-smoke.json
+      - name: Prepare and verify deployable bundle
+        env:
+          IMAGE_ID: ${{ steps.image.outputs.image_id }}
+        run: |
+          python3 deploy/release.py bundle --output artifacts/release \
+            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --image "$IMAGE_ID"
+          python3 deploy/release.py verify --bundle artifacts/release \
+            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+      - name: Exercise staging deployment and automatic rollback
+        run: |
+          python3 deploy/release.py smoke --bundle artifacts/release \
+            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --report artifacts/release-smoke.json
+      - name: Preserve verified backend release
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-release-${{ github.sha }}
+          path: artifacts/release/
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload Docker runtime result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-docker-smoke-${{ github.run_number }}
-          path: artifacts/docker-smoke.json
+          path: |
+            artifacts/docker-smoke.json
+            artifacts/release-smoke.json
           if-no-files-found: error
           retention-days: 14
 
   android-test-apk:
+    needs: static-analysis
     # A normal assembleDebug APK generally needs Metro. Build the release
     # variant to embed JavaScript, but retain Expo's generated debug signing.
     # This is an internal test artifact, never a Google Play release.
@@ -156,7 +246,15 @@ jobs:
           npx expo prebuild --no-install --platform android
       - name: Build standalone test APK
         working-directory: mobile/android
-        run: ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+        run: ./gradlew :app:lintRelease :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+      - name: Preserve Android native lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-${{ github.sha }}
+          path: mobile/android/app/build/reports/lint-results-release.*
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify APK and prepare download
         shell: bash
         run: |
@@ -188,3 +286,23 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs: [static-analysis, mobile-domain-and-data, server, postgres-durability, docker-backend, android-test-apk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every validation and artifact job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          results = json.loads(os.environ['RESULTS'])
+          failed = [name for name, job in results.items() if job['result'] != 'success']
+          if failed:
+              raise SystemExit('CI gate failed: ' + ', '.join(failed))
+          print('Every required validation and artifact job passed.')
+          PY
