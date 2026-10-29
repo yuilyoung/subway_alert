@@ -109,3 +109,7 @@ Docker 검증 다음에는 Firebase 설정을 포함해 앱을 다시 빌드하�
 ## CI 배포 산출물과 staging CD
 
 [CI/CD 안내](cicd.md)에 formatter/lint·최종 게이트·JAR/시험 APK·검증한 Docker 이미지 묶음·출처 검사·SSH·배포 후 검사·롤백 구성을 설명합니다. `deploy/compose.staging.yaml`은 기존 로컬 Compose와 별개이며 `release.py`가 검증한 불변 이미지로 SAMPLE·FCM 비활성·메모리 staging만 실행합니다. 호스트와 키는 생성하지 않았으며 관리자 보호 규칙과 environment 승인도 미적용입니다.
+
+## CD 호스트와 GitHub 환경 초기화
+
+Linux 호스트에서는 `deploy/host_init.py`, 관리자 GitHub CLI 환경에서는 `deploy/github_environment.py`를 사용합니다. 읽기 전용 계획과 실제 적용·실제 SSH 배포를 구분합니다. 최신 [CI/CD 안내](cicd.md)에 private 디렉터리/키, 승인자, main 제한, 수동·자동 배포 스위치, 고정 SSH host key와 연결 검사를 설명했습니다. 실제 서버 주소와 SSH 접속 정보는 아직 제공되지 않았고 Render 계정도 연결하지 않았습니다.

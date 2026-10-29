@@ -2,7 +2,7 @@
 
 ## 실행 흐름
 
-PR 생성·수정과 모든 push에서 CI를 실행합니다. main 병합도 push이므로 같은 검사를 다시 실행합니다. 수동 CI도 가능하지만 CD는 성공한 **main push CI**만 승격합니다.
+PR 생성·수정과 모든 push에서 CI를 실행합니다. main 병합도 push이므로 같은 검사를 다시 실행합니다. 수동 CI도 가능하지만 CD는 성공한 **main push CI**만 승격합니다. 수동 CD와 저장소 opt-in으로 활성화한 승인형 자동 CD를 제공합니다.
 
 | 검사 | 실패 조건 / 보존 산출물 |
 | --- | --- |
@@ -73,17 +73,44 @@ gh api --method PUT repos/yuilyoung/subway_alert/branches/main/protection \
 
 이 명령은 기존 보호 설정을 교체합니다. 현재 연결로 실행하거나 적용했다고 주장하지 않습니다. `CI gate`가 한 번 실행되어 검사 이름이 나타난 뒤 필수 검사로 지정하세요.
 
-## 수동 staging CD 설정
+## staging 실행 환경 준비
 
-실제 운영 서버·Tunnel·도메인은 생성하지 않습니다. 기존 Linux x86-64 호스트에 Docker Engine 28+, Compose v2, Python 3.10+, SSH를 준비합니다. 공개 저장소의 PR 코드를 운영 호스트 자체 runner에서 실행하지 않습니다. GitHub 호스팅 runner가 SSH로 검증한 묶음만 전달합니다.
+실제 운영 서버·Tunnel·도메인은 생성하지 않습니다. 기존 Linux x86-64 호스트에 Docker Engine 28+, Compose v2, Python 3.10+, SSH를 준비합니다. 이 경로는 기본 로컬 daemon(`unix:///var/run/docker.sock`, context `default`)을 명시적으로 사용합니다. rootless 소켓이나 원격 Docker context는 별도 지원하지 않으며 사용자 저장 설정을 변경하지 않습니다. 공개 저장소의 PR 코드를 운영 호스트 자체 runner에서 실행하지 않습니다. GitHub 호스팅 runner가 SSH로 검증한 묶음만 전달합니다.
 
 staging은 **SAMPLE·FCM 비활성·메모리 저장소** 전용입니다. PostgreSQL/Supabase·실제 FCM·서울 실키 배포는 이 경로에 포함되지 않습니다. 서버 교체 시 메모리 TEST 감시와 호출 예산은 초기화됩니다.
 
-1. 저장소 Settings → Environments에 `staging`을 만들고 허용 branch를 main으로 제한합니다. 승인자를 지정하고 필요하면 자기 승인 금지를 설정합니다. environment 이름만 workflow에 적었다고 승인 규칙이 생기지 않습니다.
-2. 전용 SSH 사용자에게 `/srv/subway-alert`를 소유하게 하고 디렉터리 권한을 0700으로 설정합니다. Docker 접근은 호스트의 강한 권한이므로 이 계정과 키를 배포 전용으로 관리합니다.
-3. 호스트에서 키 생성 도구로 `/srv/subway-alert/.env`를 만듭니다. 소유자 전용 0600, `BACKEND_PORT`와 단일 `SUBWAY_API_TOKENS`만 허용합니다. 기존 개발 설정 파일을 복사하지 않습니다. 포트는 루프백으로만 게시합니다.
-4. environment secrets에 아래 값을 저장합니다. SSH 호스트 키는 운영자가 별도 안전한 경로로 확인한 값을 고정합니다. 접속 중 `ssh-keyscan`으로 자동 신뢰하거나 host key 검사를 끄지 않습니다.
-5. environment variable `STAGING_DEPLOY_ENABLED=true`를 설정합니다. 미설정이면 배포 작업은 실패하고 호스트에 접속하지 않습니다.
+GitHub 계정 설정과 Linux 호스트 설정을 분리합니다. 아래 도구를 작성한 것과 실제 외부 설정을 적용한 것은 다릅니다. 현재 연결에는 GitHub Administration 권한이 없고 실제 호스트도 미정이므로 기본 plan만 실행했습니다.
+
+### GitHub staging 환경
+
+운영자 PC에 Python 3과 관리자 권한으로 인증한 GitHub CLI(`gh`)를 준비합니다. 토큰을 저장소나 대화창에 붙여 넣지 않습니다.
+
+```sh
+# 기본은 읽기 전용 계획: 인증/네트워크/변경 없음
+python3 deploy/github_environment.py plan
+# GitHub 관리자 인증 환경에서만 실제 설정 적용
+python3 deploy/github_environment.py apply
+python3 deploy/github_environment.py check
+```
+
+기본 승인자는 인증한 운영자입니다. `--reviewer GitHub로그인`으로 지정할 수 있습니다. 개인 저장소의 승인자가 스스로 배포를 시작하고 승인할 수 있도록 `prevent_self_review=false`를 사용합니다. 팀에서 자기 승인을 막으려면 별도 관리 정책으로 설정해야 하며 도구는 다른 기존 규칙을 덮어쓰지 않습니다. 관리자 설정 중 동시 편집을 피하세요. GitHub environment PUT은 원자적 create-only API가 아닙니다.
+
+도구는 `staging`, main 배포 제한, required reviewer, environment 변수 `STAGING_DEPLOY_ENABLED=false`, **저장소 변수** `STAGING_AUTO_DEPLOY=false`를 준비하고 재검사합니다. 기존 true 값·다른 보호 규칙은 바꾸지 않고 충돌로 보고합니다. 기본은 수동/자동 모두 비활성입니다. `environment_prepared`와 `deployment_ready`를 구분하며 secret 이름이 있어도 실제 SSH 연결을 검증했다고 표시하지 않습니다. 이 도구는 secret 값을 읽거나 업로드하지 않습니다.
+
+### Linux/Docker 호스트
+
+전용 SSH 사용자가 소유하는 `/srv/subway-alert`를 준비합니다. 해당 상위 디렉터리에 쓰기 권한이 없으면 호스트 관리자가 먼저 디렉터리 소유권을 설정해야 합니다. 그 사용자의 계정으로 실행합니다.
+
+```sh
+python3 deploy/host_init.py init --root /srv/subway-alert --check-engine
+python3 deploy/host_init.py check --root /srv/subway-alert --check-engine
+```
+
+도구는 root 디렉터리와 incoming/configs/releases를 0700, 새 .env를 0600으로 만듭니다. .env는 BACKEND_PORT와 단일 SUBWAY_API_TOKENS만 포함하며 키를 출력하지 않습니다. 재실행은 기존 값을 보존하고, 링크·소유자/권한 오류·다른 포트 요청은 거절합니다. 다른 포트는 init/check 모두 `--port 값`을 지정합니다. 패키지 설치·sudo·Docker 그룹·방화벽 변경은 수행하지 않습니다. SSH 계정의 Docker 접근은 호스트의 강한 권한이므로 배포 전용 계정으로 관리합니다.
+
+### 자격 증명과 활성화
+
+아래 다섯 값을 GitHub staging environment secrets에 설정합니다. 개인 키는 예를 들어 `gh secret set STAGING_SSH_PRIVATE_KEY --env staging --repo yuilyoung/subway_alert < 비공개키파일`처럼 표준 입력으로 전달하고 인자·로그에 키를 넣지 않습니다. SSH host key는 운영자가 별도 안전한 경로로 확인해 고정하며, 접속 중 ssh-keyscan으로 자동 신뢰하지 않습니다.
 
 | Secret | 값 |
 | --- | --- |
@@ -93,7 +120,13 @@ staging은 **SAMPLE·FCM 비활성·메모리 저장소** 전용입니다. Postg
 | STAGING_SSH_PRIVATE_KEY | 해당 사용자의 배포 전용 비대화식 개인 키 |
 | STAGING_SSH_KNOWN_HOSTS | 검증한 known_hosts 한 줄 이상; 비표준 포트는 `[호스트]:포트` 형식 |
 
+호스트·SSH·승인 규칙을 검증한 후 environment 변수 `STAGING_DEPLOY_ENABLED=true`를 설정합니다. 이 단계는 도구가 자동 수행하지 않습니다.
+
 Actions → **Deploy staging** → Run workflow에서 main을 선택하고 성공한 main push CI run ID를 입력합니다. PR run, 수동 CI run, 실패·취소·미완료 run, 다른 workflow·저장소는 거절합니다. 아직 CI/CD 변경이 main에 병합되지 않았거나 main 성공 산출물이 없으면 실행할 수 없습니다.
+
+자동 배포를 원하면 추가로 **저장소 변수** `STAGING_AUTO_DEPLOY=true`를 설정합니다. environment 변수는 verify-source job의 사전 조건에서 사용할 수 없으므로 자동 배포 스위치를 environment에 두면 안 됩니다. main push CI 성공 → 출처/최신 회차 검사 → staging 승인 → 배포 순서입니다. PR·실패·취소·다른 저장소·다른 workflow는 거절합니다. 자동 배포는 승인 전과 실제 전달 직전에 source가 현재 main HEAD인지 확인해 오래된 CI가 새 버전을 덮어쓰지 않게 합니다. 수동 실행은 운영자가 명시적으로 고른 성공한 main CI를 사용합니다.
+
+SSH 전송은 `deploy/ssh_deploy.py`로 실행하며 bundle·host·사용자·포트·실제 host pin을 먼저 검사합니다. 검증한 다섯 파일만 고정 경로 `/srv/subway-alert/incoming` 아래 임시 디렉터리로 전송합니다. 개인 키 파일은 임시 0600으로 만들고 외부 stdout/stderr는 공개하지 않습니다. 고정 단계·상태만 담는 결과는 CD Artifact로 14일 보관합니다. 네트워크 단절·취소·timeout이면 원격 작업 완료 여부가 불명확할 수 있으므로 호스트 상태/배포 잠금을 확인한 뒤 재시도합니다.
 
 CD는 manifest·체크섬·loaded image ID를 확인하고 이전 릴리스를 보존합니다. 이전 컨테이너를 중지하고 후보를 시작한 뒤 이미지 ID·컨테이너 health·인증·감시 저장소 경로를 검사합니다. 실패하면 이전 이미지와 설정으로 복원하고 복원도 검사합니다. 자동 복구에 성공하더라도 원래 배포 작업은 실패입니다. 첫 배포 실패는 성공 상태로 기록하지 않습니다.
 
@@ -104,3 +137,7 @@ CD는 manifest·체크섬·loaded image ID를 확인하고 이전 릴리스를 �
 코드와 CI 실행 결과, 관리자 설정 적용, 실제 서버 배포를 구분합니다. main 보호·environment 승인 규칙은 관리자 적용 전이며 SSH 호스트·키도 미설정입니다. 운영용 사용자 인증·분산 쿼터·백업 복구·모니터링·실기기 GPS/Doze/권한·서울 실키·Firebase 수신·정식 Android 서명과 스토어 게시 역시 후속 조건입니다. 설계 PDF는 비공개 이전 버전이며 이 저장소의 Markdown 설계가 최신 구현 기준입니다.
 
 JavaScript 도구는 React lint 플러그인의 지원 범위에 맞춰 ESLint 9를 고정했습니다. 현재 설치 시 upstream EOL 안내가 있으므로 플러그인의 차기 major 지원과 함께 ESLint 업그레이드를 추적해야 합니다. 검사 경고를 통과시키는 옵션으로 숨기지는 않았습니다.
+
+## CI 안에서 실제 SSH 전송 검사
+
+Docker job은 검증한 bundle을 사용해 임시 loopback SSH 서버·키·고정 host pin을 만들고 실제 ssh/scp 전송과 Docker 기동을 검사합니다. SSH 데몬은 loopback만 수신하고 외부 서버·계정에 접속하지 않습니다. `deploy/smoke_ssh.py`는 명시적 `--allow-ci-host-test`와 비어 있는 전용 테스트 root를 요구합니다. 서비스·키·프로젝트 정리를 검사하고 실제 호스팅 배포의 증거로 사용하지 않습니다. 로컬 작업 환경에는 Docker 엔진/SSHD가 없으므로 이 통합 실행은 GitHub Actions에서 검증합니다.

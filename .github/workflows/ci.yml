@@ -201,6 +201,27 @@ jobs:
         run: |
           python3 deploy/release.py smoke --bundle artifacts/release \
             --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --report artifacts/release-smoke.json
+      - name: Prepare isolated loopback SSH test host
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            policy=/usr/sbin/policy-rc.d
+            if ! sudo test -e "$policy"; then
+              printf '#!/bin/sh\nexit 101\n' | sudo tee "$policy" > /dev/null
+              sudo chmod 755 "$policy"
+              trap 'sudo rm -f "$policy"' EXIT
+            fi
+            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends openssh-server
+          fi
+          sudo install -d -m 0755 /run/sshd
+          test ! -e /srv/subway-alert
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /srv/subway-alert
+      - name: Verify real loopback SSH transfer and deployment
+        run: |
+          python3 deploy/smoke_ssh.py --allow-ci-host-test --bundle artifacts/release \
+            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --report artifacts/ssh-smoke.json
       - name: Preserve verified backend release
         uses: actions/upload-artifact@v4
         with:
@@ -216,6 +237,7 @@ jobs:
           path: |
             artifacts/docker-smoke.json
             artifacts/release-smoke.json
+            artifacts/ssh-smoke.json
           if-no-files-found: error
           retention-days: 14
 
