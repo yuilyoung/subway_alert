@@ -12,7 +12,16 @@ import org.springframework.scheduling.annotation.Scheduled;
 public class MonitorScheduler {
   private final MonitorService service;
   private final SeoulTrainProvider provider;
-  public MonitorScheduler(MonitorService service,ObjectMapper mapper){this.service=service;this.provider=SeoulTrainProvider.sample(mapper);}
-  @Scheduled(fixedDelayString="${monitor.poll-interval-ms:120000}",initialDelayString="${monitor.poll-interval-ms:120000}")
-  public void poll(){service.poll(()->provider.fetch("2"));}
+
+  public MonitorScheduler(MonitorService service, ObjectMapper mapper) {
+    this.service = service;
+    this.provider = SeoulTrainProvider.sample(mapper);
+  }
+
+  @Scheduled(
+      fixedDelayString = "${monitor.poll-interval-ms:120000}",
+      initialDelayString = "${monitor.poll-interval-ms:120000}")
+  public void poll() {
+    service.poll(() -> provider.fetch("2"));
+  }
 }

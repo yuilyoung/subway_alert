@@ -1,0 +1,136 @@
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful main push CI run ID to promote (no rebuild)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: subway-alert-staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  verify-source:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       vars.STAGING_AUTO_DEPLOY == 'true')
+    name: Verify trusted main CI source
+    runs-on: ubuntu-latest
+    outputs:
+      ci_run_id: ${{ steps.trigger.outputs.ci_run_id }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      artifact_name: ${{ steps.source.outputs.artifact_name }}
+    steps:
+      - name: Require main CD workflow
+        env:
+          SELECTED_REF: ${{ github.ref }}
+        run: test "$SELECTED_REF" = refs/heads/main
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Select and validate manual or automatic trigger
+        id: trigger
+        env:
+          STAGING_AUTO_DEPLOY: ${{ vars.STAGING_AUTO_DEPLOY }}
+        run: python3 deploy/cd_event.py >> "$GITHUB_OUTPUT"
+      - name: Fetch selected run metadata
+        uses: actions/github-script@v7
+        env:
+          CI_RUN_ID: ${{ steps.trigger.outputs.ci_run_id }}
+        with:
+          script: |
+            const id = process.env.CI_RUN_ID;
+            if (!/^[1-9][0-9]{0,14}$/.test(id)) throw new Error('Invalid CI run ID');
+            const {data} = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(id),
+            });
+            require('fs').writeFileSync('ci-run.json', JSON.stringify(data));
+      - name: Reject PR, failed, skipped or foreign artifacts
+        id: source
+        env:
+          CI_RUN_ID: ${{ steps.trigger.outputs.ci_run_id }}
+        run: python3 deploy/ci_provenance.py ci-run.json --run-id "$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Require automatic source to remain current main
+        if: github.event_name == 'workflow_run'
+        uses: actions/github-script@v7
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        with:
+          script: |
+            const {data} = await github.rest.repos.getBranch({...context.repo, branch: 'main'});
+            if (data.commit.sha !== process.env.SOURCE_SHA) {
+              throw new Error('Automatic CD source is no longer current main; use a newer successful CI.');
+            }
+
+  deploy:
+    name: Promote verified image to staging
+    needs: verify-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    env:
+      SOURCE_SHA: ${{ needs.verify-source.outputs.source_sha }}
+      CI_RUN_ID: ${{ needs.verify-source.outputs.ci_run_id }}
+    steps:
+      - name: Require explicit staging enablement
+        env:
+          ENABLED: ${{ vars.STAGING_DEPLOY_ENABLED }}
+        run: |
+          if [ "$ENABLED" != true ]; then
+            echo 'Configure staging environment, approval, host and SSH secrets; then enable STAGING_DEPLOY_ENABLED.'
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-source.outputs.source_sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.verify-source.outputs.artifact_name }}
+          path: release
+          run-id: ${{ needs.verify-source.outputs.ci_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify exact manifest, source, run and all file checksums
+        run: python3 deploy/release.py verify --bundle release --source-sha "$SOURCE_SHA" --run-id "$CI_RUN_ID"
+      - name: Require automatic source to remain current main
+        if: github.event_name == 'workflow_run'
+        uses: actions/github-script@v7
+        env:
+          SOURCE_SHA: ${{ needs.verify-source.outputs.source_sha }}
+        with:
+          script: |
+            const {data} = await github.rest.repos.getBranch({...context.repo, branch: 'main'});
+            if (data.commit.sha !== process.env.SOURCE_SHA) {
+              throw new Error('Automatic CD source is no longer current main; use a newer successful CI.');
+            }
+      - name: Transfer and deploy with pinned SSH host identity
+        env:
+          SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          SSH_PORT: ${{ secrets.STAGING_SSH_PORT }}
+          SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          python3 deploy/ssh_deploy.py --bundle release \
+            --source-sha "$SOURCE_SHA" --run-id "$CI_RUN_ID" --report artifacts/cd-result.json
+      - name: Preserve credential-free deployment result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-cd-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: artifacts/cd-result.json
+          if-no-files-found: warn
+          retention-days: 14

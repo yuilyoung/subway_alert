@@ -1,0 +1,28 @@
+# SAMPLE-only, single-instance staging. Image is the immutable ID verified by release.py.
+services:
+  backend:
+    image: "${SUBWAY_IMAGE:?verified immutable image required}"
+    pull_policy: never
+    ports:
+      - target: 8080
+        published: "${BACKEND_PORT:?private staging port required}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    environment:
+      SERVER_ADDRESS: "0.0.0.0"
+      PORT: "8080"
+      SEOUL_SUBWAY_KEY: "sample"
+      FCM_ENABLED: "false"
+      MONITOR_STORE: "memory"
+      SUBWAY_API_TOKENS: "${SUBWAY_API_TOKENS:?private staging token required}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -Djava.io.tmpdir=/tmp"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s

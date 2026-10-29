@@ -28,7 +28,12 @@ public class NotificationConfiguration {
   }
 
   static FirebaseOptions options(GoogleCredentials credentials, String projectId) {
-    return FirebaseOptions.builder().setCredentials(credentials).setProjectId(projectId.strip())
-        .setConnectTimeout(5000).setReadTimeout(5000).setWriteTimeout(5000).build();
+    return FirebaseOptions.builder()
+        .setCredentials(credentials)
+        .setProjectId(projectId.strip())
+        .setConnectTimeout(5000)
+        .setReadTimeout(5000)
+        .setWriteTimeout(5000)
+        .build();
   }
 }

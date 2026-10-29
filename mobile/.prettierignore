@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+android/
+ios/
+dist/
+build/
+coverage/
+google-services.json
+*service-account*.json

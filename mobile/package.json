@@ -7,6 +7,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "test": "node --test test/*.test.js",
+    "lint": "eslint . --max-warnings=0",
+    "format:check": "prettier --check \"**/*.{js,jsx,mjs,cjs,json}\" .prettierrc.json",
+    "format": "prettier --write \"**/*.{js,jsx,mjs,cjs,json}\" .prettierrc.json",
     "ios": "expo run:ios"
   },
   "dependencies": {
@@ -20,5 +23,13 @@
     "expo-task-manager": "~14.0.0",
     "react": "19.1.0",
     "react-native": "0.81.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "globals": "16.5.0",
+    "prettier": "3.6.2"
   }
 }

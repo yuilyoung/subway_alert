@@ -1,6 +1,8 @@
 # Only Maven source inputs enter the build context.
 **
 !pom.xml
+!config/
+!config/pmd-ruleset.xml
 !src/
 !src/**
 src/**/google-services.json
