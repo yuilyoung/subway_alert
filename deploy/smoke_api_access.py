@@ -50,7 +50,7 @@ def server(jar, token):
                        SUBWAY_API_TOKENS=token, FCM_ENABLED='false', SEOUL_SUBWAY_KEY='sample')
     # Capture logs without echoing environment or credential material on failures.
     with tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(['java', '-jar', str(jar)], env=environment,
+        process = subprocess.Popen(['java', '-jar', str(jar), '--monitor.poll-interval-ms=3600000'], env=environment,
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 40
@@ -142,8 +142,19 @@ def check_registration_recovery(port, token):
     require(status == 200 and replay['id'] == identity and replay['sessionToken'] == secret
             and replay['status'] == 'CANCELLED' and replay['expiresAt'] == expires,
             'replay must preserve cancellation, identity and original expiry')
-    status, _, payload = request(port, '/api/monitor-sessions', token, 'POST', body,
-                                 session_token=secrets.token_hex(32), idempotency_key=identity)
+    other_secret = secrets.token_hex(32)
+
+    def conflicting_registration():
+        return request(port, '/api/monitor-sessions', token, 'POST', body,
+                       session_token=other_secret, idempotency_key=identity)
+
+    # The initial cancellation allocated a marker. It shares the creation budget with both replays.
+    status, headers, _ = conflicting_registration()
+    retry_after = int(headers.get('Retry-After', '0'))
+    require(status == 429 and 1 <= retry_after <= 20,
+            'registration budget must supply a bounded retry hint')
+    time.sleep(retry_after)
+    status, _, payload = conflicting_registration()
     require(status == 409, 'conflicting registration capability must be rejected')
     require(secret.encode() not in payload, 'conflict must not disclose the original credential')
 
@@ -151,17 +162,24 @@ def check_registration_recovery(port, token):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jar', type=Path, required=True)
+    parser.add_argument('--mobile-client', action='store_true',
+                        help='Also exercise the mobile registration client with Node.js')
     args = parser.parse_args()
     if not args.jar.is_file():
         parser.error('server JAR is missing; run Maven verify first')
     with server(args.jar, '') as port:
         check_unconfigured(port)
     token, recovery_token = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
-    with server(args.jar, token + ',' + recovery_token) as port:
+    mobile_token = secrets.token_urlsafe(32)
+    with server(args.jar, ','.join((token, recovery_token, mobile_token))) as port:
         check_keyed(port, token)
+        if args.mobile_client:
+            script = Path(__file__).resolve().parents[1] / 'mobile/integration/registration.cjs'
+            subprocess.run(['node', str(script), str(port)], check=True, timeout=30,
+                           env=dict(os.environ, SMOKE_DEVICE_KEY=mobile_token))
         check_registration_recovery(port, recovery_token)
     print('Packaged API smoke: health 200, unconfigured 503, missing/wrong/duplicate key 401, valid key 200, creation/burst 429; no external API calls')
-    print('Registration recovery smoke: cancel-before-create, discarded response, GET recovery, stable cancelled replay and conflict 409 passed')
+    print('Registration recovery smoke: cancel-before-create, discarded response, GET recovery, stable cancelled replay, quota 429 and conflict 409 after refill passed')
 
 
 if __name__ == '__main__':

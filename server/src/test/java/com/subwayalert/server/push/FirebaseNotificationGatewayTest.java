@@ -48,7 +48,7 @@ class FirebaseNotificationGatewayTest {
   @Test void firebaseSdkSerializesNotificationPayloadForAndroid() throws Exception {
     var envelope = new FirebaseNotificationGateway.Envelope("device-token", "[시험] 알림", "시험입니다", "subway-alerts", 30000, "HIGH", "TEST");
     String json = com.google.api.client.json.gson.GsonFactory.getDefaultInstance().toString(FirebaseNotificationGateway.toMessage(envelope));
-    var root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+    var root = new tools.jackson.databind.ObjectMapper().readTree(json);
     assertEquals("device-token", root.path("token").asText());
     assertEquals("[시험] 알림", root.path("notification").path("title").asText());
     assertEquals("high", root.path("android").path("priority").asText());

@@ -26,12 +26,14 @@ final class ApiRateLimits {
 
   synchronized long preAuthentication() { return preAuth.acquire(elapsedNanos.getAsLong()); }
 
+  synchronized long acquireCreation(int key) { return creation[key].acquire(elapsedNanos.getAsLong()); }
+
   synchronized long authenticated(int key,String method,String path) {
     long now=elapsedNanos.getAsLong();
     long retry=perKey[key].acquire(now);
     if(retry>0)return retry;
     if("POST".equals(method) && ("/api/track".equals(path) || "/api/monitor-sessions".equals(path))) {
-      retry=creation[key].acquire(now);
+      retry=acquireCreation(key);
       if(retry>0)return retry;
     }
     // Spring's GET mapping invokes the provider for HEAD too. Apply this to every method on the path.

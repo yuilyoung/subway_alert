@@ -45,12 +45,15 @@ function createRegistrationFlow({secureStore,crypto,fetchImpl,development=false,
   locked=true;try{return await operation();}finally{locked=false;}
  }
  async function save(value){
-  try{await secureStore.setItemAsync(KEY,JSON.stringify(value));}
+  // Older server-issued tokens only round-trip under the original record format.
+  const stored={...value};
+  if(stored.phase==='ACTIVE'&&!SECRET.test(stored.sessionToken))delete stored.phase;
+  try{await secureStore.setItemAsync(KEY,JSON.stringify(stored));}
   catch(_){throw new Error('감시 복구 정보를 안전하게 저장하지 못했습니다. 저장된 등록 결과를 조회하거나 종료해 주세요.');}
   record=Object.freeze(value);publish();
  }
- async function activate(value){
-  const active={phase:'ACTIVE',id:record.id,sessionToken:record.sessionToken,server:record.server,accessToken:record.accessToken,expiresAt:value.expiresAt};
+ async function activate(value,accessToken){
+  const active={phase:'ACTIVE',id:record.id,sessionToken:record.sessionToken,server:record.server,accessToken,expiresAt:value.expiresAt};
   await save(active);return value;
  }
  function replaySelection(saved){return {train:{lineId:'2',trainId:saved.request.trainId,direction:saved.request.direction,express:false,observedAt:saved.observedAt},previousStation:saved.request.previousStation,destinationStation:saved.request.destinationStation};}
@@ -79,17 +82,18 @@ function createRegistrationFlow({secureStore,crypto,fetchImpl,development=false,
     const pending={phase:'PENDING',id,sessionToken,server:validateServerUrl(connection.server,development),accessToken:validateAccessToken(connection.accessToken),request,observedAt:train.observedAt};
     await save(pending);return {id,sessionToken};
    });
-   await activate(out.created);return out;
+   await activate(out.created,out.created.accessToken);return out;
   }),
   retry:connection=>exclusive(async()=>{
    const saved=current();if(saved.phase!=='PENDING')throw new Error('PENDING 등록 대기 정보만 같은 요청으로 재시도할 수 있습니다.');
    if(observationStatus(saved.observedAt,now())!=='fresh')throw new Error('원래 열차 관측이 60초를 넘었거나 오래되었습니다. 등록 결과를 조회하거나 종료해 주세요.');
    const value=await startMonitor(saved.server,{...replaySelection(saved),id:saved.id,sessionToken:saved.sessionToken,fcmToken:saved.request.fcmToken,accessToken:sessionAccessToken(saved,connection,development)},development,fetchImpl,now());
-   return activate(value);
+   return activate(value,value.accessToken);
   }),
   status:connection=>exclusive(async()=>{
-   const saved=current();const value=await monitorRequest(saved.server,saved,'status',development,fetchImpl,sessionAccessToken(saved,connection,development));
-   if(saved.phase==='PENDING')await activate(value);
+   const saved=current();const accessToken=sessionAccessToken(saved,connection,development);
+   const value=await monitorRequest(saved.server,saved,'status',development,fetchImpl,accessToken);
+   if(saved.phase==='PENDING'||saved.accessToken!==accessToken)await activate(value,accessToken);
    return value;
   }),
   cancel:connection=>exclusive(async()=>{

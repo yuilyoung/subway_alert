@@ -1,8 +1,9 @@
 package com.subwayalert.server.live;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -12,10 +13,14 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** Seoul Open Data API reader. This is not a passenger train-identification or alert service. */
 public final class SeoulTrainProvider {
+  private static final int MAX_RESPONSE_BYTES = 2_000_000;
   private static final String HOST="swopenapi.seoul.go.kr";
   private static final DateTimeFormatter DATE=DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(java.time.format.ResolverStyle.STRICT);
   private static final ZoneId SEOUL=ZoneId.of("Asia/Seoul");
@@ -51,11 +56,43 @@ public final class SeoulTrainProvider {
     HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build();
     Transport transport=uri->{
       var request=HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).GET().build();
-      var response=http.send(request,HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-      if(response.statusCode()!=200 || response.body().length()>2_000_000) throw new ProviderException("Upstream unavailable");
-      return response.body();
+      var pending=http.sendAsync(request, info -> new LimitedBody(MAX_RESPONSE_BYTES));
+      try {
+        var response=pending.get(10, TimeUnit.SECONDS);
+        if(response.statusCode()!=200) throw new ProviderException("Upstream unavailable");
+        return response.body();
+      } finally {
+        if(!pending.isDone()) pending.cancel(true);
+      }
     };
     return new SeoulTrainProvider(key,base,transport,mapper,Instant::now);
+  }
+  /** Count actual bytes as they arrive, including responses with no Content-Length. */
+  static final class LimitedBody implements HttpResponse.BodySubscriber<String> {
+    private final HttpResponse.BodySubscriber<String> delegate =
+        HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8);
+    private Flow.Subscription subscription;
+    private long remaining;
+
+    LimitedBody(int limit) { remaining=limit; }
+    public CompletionStage<String> getBody() { return delegate.getBody(); }
+    public void onSubscribe(Flow.Subscription subscription) {
+      this.subscription=subscription;
+      delegate.onSubscribe(subscription);
+    }
+    public void onNext(List<ByteBuffer> buffers) {
+      for (ByteBuffer buffer : buffers) {
+        remaining-=buffer.remaining();
+        if (remaining<0) {
+          subscription.cancel();
+          delegate.onError(new ProviderException("Upstream response too large"));
+          return;
+        }
+      }
+      delegate.onNext(buffers);
+    }
+    public void onError(Throwable error) { delegate.onError(error); }
+    public void onComplete() { delegate.onComplete(); }
   }
   static URI endpoint(URI base,String key,int from,int to){
     if(base==null || !HOST.equalsIgnoreCase(base.getHost()) || base.getRawUserInfo()!=null || base.getPort()!=-1 || base.getRawQuery()!=null || base.getRawFragment()!=null || !(base.getRawPath()==null || base.getRawPath().isEmpty() || base.getRawPath().equals("/")) || key==null || !key.matches("[A-Za-z0-9_-]{1,128}") || from<0 || to<from) throw new IllegalArgumentException("Invalid provider configuration");
@@ -72,11 +109,15 @@ public final class SeoulTrainProvider {
     try {
       do {
         Page page=parse(transport.get(endpoint(base,key,start,sample?5:start+pageSize-1)),mapper,now.get());
+        if(page.trains().size()>pageSize) throw new ProviderException("Unexpected Seoul API page size");
         trains.addAll(page.trains());
         if(sample || page.trains().isEmpty() || start+pageSize-1>=page.total()) break;
         start+=pageSize;
         if(start>5000){truncated=true;break;}
       } while(true);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new ProviderException("Seoul API request interrupted");
     } catch (ProviderException e) { throw e; }
       catch (Exception e) { throw new ProviderException("Seoul API request failed or timed out"); }
     String warning=sample?"공개 샘플키: 최대 5건만 반환되며 탑승 열차나 알림을 확인할 수 없습니다.":"수신 시각은 서울 시간으로 추정합니다. 탑승 여부와 실시간 정확도는 검증되지 않았습니다.";
@@ -95,7 +136,10 @@ public final class SeoulTrainProvider {
       List<Train> trains=new ArrayList<>();
       for(JsonNode row:rows){
         if(!"1002".equals(row.path("subwayId").asText()))throw new ProviderException("Unexpected line in Seoul response");
-        String station=row.path("statnNm").asText(), trainId=row.path("trainNo").asText();
+        JsonNode number=row.path("trainNo");
+        if(!row.path("statnNm").isTextual() || !(number.isTextual() || number.isIntegralNumber()))
+          throw new ProviderException("Invalid train identity");
+        String station=row.path("statnNm").textValue(), trainId=number.asText();
         if(station.isBlank() || trainId.isBlank())throw new ProviderException("Invalid train identity");
         String direction=switch(row.path("updnLine").asText()){case "0"->"INNER";case "1"->"OUTER";default->throw new ProviderException("Unknown direction");};
         String state=switch(row.path("trainSttus").asText()){case "0"->"ENTERING";case "1"->"ARRIVED";case "2"->"DEPARTED";case "3"->"PREVIOUS_DEPARTED";default->throw new ProviderException("Unknown train state");};

@@ -14,8 +14,14 @@ function distanceMeters(a,b) {
   const h=Math.sin(dLat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.latitude))*Math.sin(dLon/2)**2;
   return 2*R*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
 }
+function usableLocation(point,now) {
+  return point && Number.isFinite(point.latitude) && Math.abs(point.latitude)<=90 &&
+    Number.isFinite(point.longitude) && Math.abs(point.longitude)<=180 &&
+    Number.isFinite(point.accuracy) && point.accuracy>=0 && point.accuracy<=80 &&
+    Number.isFinite(point.timestamp) && point.timestamp<=now+5000 && now-point.timestamp<=30000;
+}
 function shouldAlert({target, point, now, wasOutside}) {
-  if (!target || !point || !wasOutside || !Number.isFinite(point.accuracy) || point.accuracy>80 || point.accuracy<0 || !Number.isFinite(point.timestamp) || point.timestamp>now+5000 || now-point.timestamp>30000) return false;
+  if (!target || !wasOutside || !usableLocation(point,now)) return false;
   return distanceMeters(target,point)<=180;
 }
 function matchesSchedule(schedule,date) {
@@ -28,4 +34,4 @@ function matchesSchedule(schedule,date) {
   if (end>start) return schedule.days.includes(date.getDay()) && now>=start && now<end;
   return (now>=start && schedule.days.includes(date.getDay())) || (now<end && schedule.days.includes((date.getDay()+6)%7));
 }
-module.exports={addFavorite,findRoute,distanceMeters,shouldAlert,matchesSchedule};
+module.exports={addFavorite,findRoute,distanceMeters,shouldAlert,matchesSchedule,usableLocation};

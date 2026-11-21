@@ -70,6 +70,15 @@ class RuntimePolicyTests(unittest.TestCase):
                 details[field] = value
                 smoke.validate_runtime(details, '10001', 43127)
 
+    def test_tmpfs_requires_the_configured_size_and_mount_flags(self):
+        for options in ('rw', 'rw,noexec,nosuid', 'rw,noexec,size=128m',
+                        'rw,nosuid,size=128m', 'rw,noexec,nosuid,size=1g',
+                        'rw,noexec,nosuid,size=128m,exec'):
+            with self.subTest(options=options), self.assertRaises(smoke.SmokeFailure):
+                details = runtime_fixture()
+                details['tmpfs']['/tmp'] = options
+                smoke.validate_runtime(details, '10001', 43127)
+
 
 class SharedHttpSmokeTests(unittest.TestCase):
     def test_registration_check_rejects_a_server_without_cancel_before_create(self):

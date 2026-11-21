@@ -1,10 +1,15 @@
 package com.subwayalert.server.monitor;
 
+import com.subwayalert.server.access.ApiAccessFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collections;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.LongSupplier;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -26,10 +31,16 @@ public final class MonitorController {
   @GetMapping("/{id}") public MonitorService.StatusResponse status(@PathVariable UUID id,@RequestHeader(value="X-Session-Token",required=false) String secret){
     try{return service.status(id,secret);}catch(MonitorService.NotFound e){throw notFound();}
   }
-  @DeleteMapping("/{id}") public MonitorService.StatusResponse cancel(@PathVariable UUID id,@RequestHeader(value="X-Session-Token",required=false) String secret){
-    try{return service.cancel(id,secret);}catch(MonitorService.NotFound e){throw notFound();}
+  @DeleteMapping("/{id}") public MonitorService.StatusResponse cancel(@PathVariable UUID id,@RequestHeader(value="X-Session-Token",required=false) String secret,
+      @RequestAttribute(ApiAccessFilter.CREATION_BUDGET) LongSupplier creationBudget){
+    try{return service.cancel(id,secret,creationBudget);}catch(MonitorService.NotFound e){throw notFound();}
     catch(IllegalArgumentException e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid registration identity");}
     catch(MonitorService.CapacityExceeded e){throw capacityExceeded();}
+  }
+  @ExceptionHandler(MonitorService.CreationRateLimited.class)
+  public ResponseEntity<Map<String,String>> creationRateLimited(MonitorService.CreationRateLimited e){
+    return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header(HttpHeaders.RETRY_AFTER,Long.toString(e.retryAfter))
+        .body(Map.of("error","API_RATE_LIMITED"));
   }
   @PostMapping("/{id}/test") public MonitorService.StatusResponse test(@PathVariable UUID id,@RequestHeader(value="X-Session-Token",required=false) String secret){
     try{return service.test(id,secret);}catch(MonitorService.NotFound e){throw notFound();}

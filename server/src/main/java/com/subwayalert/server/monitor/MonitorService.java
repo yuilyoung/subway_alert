@@ -17,6 +17,7 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,10 @@ public final class MonitorService {
   public static final class NotFound extends RuntimeException { }
   public static final class Conflict extends RuntimeException { public Conflict(String msg){super(msg);} }
   public static final class CapacityExceeded extends RuntimeException { }
+  static final class CreationRateLimited extends RuntimeException {
+    final long retryAfter;
+    CreationRateLimited(long retryAfter){this.retryAfter=retryAfter;}
+  }
 
   private static final class Session {
     final UUID id; final byte[] tokenHash,requestFingerprint;
@@ -112,11 +117,18 @@ public final class MonitorService {
     Session s=authorized(id,secret);synchronized(s){expire(s,clock.instant());return view(s);}
   }
   /** Takes the store lock before any session lock, just like creation and pruning. */
-  public synchronized StatusResponse cancel(UUID id,String secret){
+  public StatusResponse cancel(UUID id,String secret){return cancel(id,secret,()->0L);}
+  synchronized StatusResponse cancel(UUID id,String secret,LongSupplier creationBudget){
     Instant now=clock.instant();prune(now);
     Session s=sessions.get(id);
     if(s==null){
+      // Older servers chose the UUID themselves and issued 32 random bytes as unpadded base64url.
+      // No delayed registration with that capability can create a session on this server.
+      if(validUuid(id) && secret!=null && secret.matches("[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]"))
+        return new StatusResponse(id,"CANCELLED","TEST",now,"NONE",pollStatus);
       validateIdentity(id,secret);
+      long retryAfter=creationBudget.getAsLong();
+      if(retryAfter>0)throw new CreationRateLimited(retryAfter);
       if(sessions.size()>=MAX_SESSIONS)throw new CapacityExceeded();
       s=Session.cancelled(id,digest(secret),now);sessions.put(id,s);
     }else if(!authorized(s,secret))throw new NotFound();
@@ -195,8 +207,11 @@ public final class MonitorService {
       s.inFlight=false;
     }
   }
-  private Session authorized(UUID id,String secret){
-    Session s; synchronized(this){s=sessions.get(id);}
+  private synchronized Session authorized(UUID id,String secret){
+    Session s=sessions.get(id);
+    if(s!=null && !clock.instant().isBefore(s.expires.plus(RETENTION))){
+      sessions.remove(id);throw new NotFound();
+    }
     if(s==null||!authorized(s,secret))throw new NotFound();
     return s;
   }
@@ -205,8 +220,9 @@ public final class MonitorService {
   }
   private static StartResponse startView(Session s,String secret){return new StartResponse(s.id,secret,s.status,"TEST",s.expires);}
   private static Conflict registrationConflict(){return new Conflict("Registration conflicts with an existing session");}
+  private static boolean validUuid(UUID id){return id!=null && id.version()==4 && id.variant()==2;}
   private static void validateIdentity(UUID id,String secret){
-    if(id==null||id.version()!=4||id.variant()!=2||secret==null||!secret.matches("[0-9a-f]{64}"))
+    if(!validUuid(id)||secret==null||!secret.matches("[0-9a-f]{64}"))
       throw new IllegalArgumentException("Invalid registration identity");
   }
   private static StartRequest canonical(StartRequest req){

@@ -1,6 +1,6 @@
 package com.subwayalert.server.monitor;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.subwayalert.server.live.SeoulTrainProvider;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;

@@ -46,6 +46,7 @@ class SmokeFailure(Exception):
 def validate_runtime(details, uid, port):
     """Reject unsafe or unhealthy facts read from the running container."""
     expected_ports = {'8080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': str(port)}]}
+    tmp_options = set((details.get('tmpfs') or {}).get('/tmp', '').split(','))
     if not (
         uid.strip() == '10001'
         and details.get('running') is True
@@ -55,7 +56,9 @@ def validate_runtime(details, uid, port):
         and 'ALL' in (details.get('cap_drop') or [])
         and any(option in ('no-new-privileges', 'no-new-privileges:true')
                 for option in (details.get('security_opt') or []))
-        and '/tmp' in (details.get('tmpfs') or {})
+        and {'rw', 'noexec', 'nosuid'} <= tmp_options
+        and tmp_options.isdisjoint({'ro', 'exec', 'suid'})
+        and {option for option in tmp_options if option.startswith('size=')} == {'size=128m'}
         and details.get('ports') == expected_ports
         and details.get('sample') is True
         and details.get('fcm_disabled') is True

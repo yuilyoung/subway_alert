@@ -12,5 +12,11 @@ __pycache__/
 .env
 .env.*
 !.env.example
+# Firebase configuration and server credentials supplied by the operator.
+google-services.json
+*-firebase-adminsdk-*.json
+*service-account*.json
+serviceAccountKey.json
+application_default_credentials.json
 .DS_Store
 artifacts/

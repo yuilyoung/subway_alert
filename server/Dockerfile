@@ -5,10 +5,10 @@ COPY pom.xml ./
 COPY src ./src
 RUN mvn --batch-mode --no-transfer-progress verify
 
-FROM eclipse-temurin:17-jre-alpine AS runtime
+FROM eclipse-temurin:17-jre-jammy AS runtime
 WORKDIR /app
-RUN addgroup -S app \
-    && adduser -S -u 10001 -G app app \
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
     && command -v wget >/dev/null
 COPY --from=build --chown=app:app /src/target/subway-alert-server-*.jar /app/server.jar
 USER app

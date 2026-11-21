@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
       - name: Install mobile dependencies
         working-directory: mobile
         run: npm ci
@@ -42,8 +42,11 @@ jobs:
       - name: Build and test server
         working-directory: server
         run: mvn --batch-mode --no-transfer-progress verify
-      - name: Smoke test packaged API authentication and limits
-        run: python3 deploy/smoke_api_access.py --jar server/target/subway-alert-server-0.1.0.jar
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Smoke test packaged API and mobile registration recovery
+        run: python3 deploy/smoke_api_access.py --mobile-client --jar server/target/subway-alert-server-0.1.0.jar
       - name: Run standalone tracking engine tests
         working-directory: server
         run: |
@@ -54,8 +57,18 @@ jobs:
           java -cp /tmp/subway-server-test com.subwayalert.server.domain.TrackingEngineTest
 
   docker-backend:
-    name: Docker backend runtime and API checks
-    runs-on: ubuntu-latest
+    name: ${{ matrix.job_name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            job_name: Docker backend runtime and API checks
+            artifact: backend-docker-smoke
+          - runner: ubuntu-24.04-arm
+            job_name: Docker backend runtime and API checks (arm64)
+            artifact: backend-docker-smoke-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -66,11 +79,14 @@ jobs:
           python3 --version
       - name: Build and test the isolated backend container
         run: python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
+      - name: Verify draft schema ownership and slot constraints in PostgreSQL
+        if: matrix.runner == 'ubuntu-latest'
+        run: python3 supabase/tests/test_schema.py -v
       - name: Upload Docker runtime result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-docker-smoke-${{ github.run_number }}
+          name: ${{ matrix.artifact }}-${{ github.run_number }}
           path: artifacts/docker-smoke.json
           if-no-files-found: error
           retention-days: 14
@@ -86,7 +102,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

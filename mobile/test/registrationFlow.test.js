@@ -139,3 +139,58 @@ test('connection changes during permission or PENDING storage prevent a registra
  await flow.restore();await assert.rejects(()=>flow.start(connection,()=>current,selection,async()=>{current={...connection};return 'original-native-token';}),/연결 정보/);assert.equal(writes,0);
  current=connection;await assert.rejects(()=>flow.start(connection,()=>current,selection,async()=>'original-native-token'),/연결 정보/);assert.equal(writes,1);assert.equal(calls,0);assert.equal(flow.getState().record.phase,'PENDING');
 });
+
+test('PENDING recovery keeps the working rotated key for later cleanup on its original server', async () => {
+ const rotated={server:connection.server,accessToken:'B'.repeat(43)};
+ for (const action of ['retry','status']) {
+  const h=harness({raw:JSON.stringify(pending),fetchImpl:async()=>reply({...result,deliveryStatus:'NONE',pollStatus:'NOT_POLLED'})});
+  await h.flow.restore();
+  await h.flow[action](rotated);
+  await h.flow.restore();
+  await h.flow.status({server:'https://other.example',accessToken:'C'.repeat(43)});
+  assert.equal(h.calls.at(-1).options.headers.Authorization,`Bearer ${rotated.accessToken}`);
+ }
+});
+
+test('registration rejects input that cannot be restored or accepted by the server before creating a pending record', async () => {
+ const invalidSelections=[
+  {...selection,train:{...selection.train,observedAt:'2026-10-27 00:00:00Z'}},
+  {...selection,previousStation:'선\u0000릉'},
+  {...selection,train:{...selection.train,trainId:'00\n21'}}
+ ];
+ for (const input of invalidSelections) {
+  const h=harness();await h.flow.restore();
+  await assert.rejects(()=>h.flow.start(connection,()=>connection,input,async()=>'native-token'));
+  assert.equal(h.raw,null);
+  assert.equal(h.calls.length,0);
+ }
+ const h=harness();await h.flow.restore();
+ await assert.rejects(()=>h.flow.start(connection,()=>connection,selection,async()=>'FCM\rToken'));
+ assert.equal(h.raw,null);
+ assert.equal(h.calls.length,0);
+});
+
+test('confirmed status refresh preserves the working same-origin key across restarts for current and legacy sessions', async () => {
+ const active={id:ID,server:connection.server,accessToken:API,expiresAt:result.expiresAt};
+ const rotated={...connection,accessToken:'B'.repeat(43)};
+ for(const identity of [{phase:'ACTIVE',sessionToken:SECRET},{sessionToken:'legacy_secret'}]){
+  const h=harness({raw:JSON.stringify({...active,...identity}),fetchImpl:async()=>reply({...result,deliveryStatus:'NONE',pollStatus:'NOT_POLLED'})});
+  await h.flow.restore();
+  await h.flow.status(rotated);
+  await h.flow.restore();
+  await h.flow.status(null);
+  assert.equal(h.calls.at(-1).options.headers.Authorization,`Bearer ${rotated.accessToken}`);
+ }
+});
+
+test('a retired legacy session clears only after its original server confirms terminal status', async () => {
+ const legacy={id:ID,sessionToken:'a'.repeat(42)+'A',server:connection.server,accessToken:API,expiresAt:result.expiresAt};
+ let status=404;
+ const h=harness({raw:JSON.stringify(legacy),fetchImpl:async()=>reply({id:ID,mode:'TEST',status:'EXPIRED',expiresAt:result.expiresAt,deliveryStatus:'NONE',pollStatus:'NOT_POLLED'},status)});
+ await h.flow.restore();
+ await assert.rejects(()=>h.flow.cancel(connection),e=>e.status===404);
+ assert.deepEqual(JSON.parse(h.raw),legacy);
+ status=200;
+ await h.flow.cancel(connection);
+ assert.equal(h.raw,null);
+});

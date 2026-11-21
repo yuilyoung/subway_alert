@@ -4,12 +4,13 @@ const UUID4=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12
 const SECRET=/^[0-9a-f]{64}$/;
 const STATES=['TRACKING','SAMPLE_MATCHED','CANCELLED','EXPIRED'];
 const validTime=value=>typeof value==='string'&&/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value));
-function station(value){return typeof value==='string' && value.trim().length>0 && value.trim().length<=40}
+function clean(value,limit){return typeof value==='string' && value.trim().length>0 && value.length<=limit && !/[\u0000-\u001f\u007f-\u009f]/.test(value);}
+function station(value){return typeof value==='string' && clean(value.trim(),40)}
 function validateSelection(train,previousStation,destinationStation,now=Date.now()){
-  if(!train || train.lineId!=='2' || !['INNER','OUTER'].includes(train.direction) || typeof train.trainId!=='string' || !train.trainId.trim() || train.trainId.length>64 || train.express!==false || observationStatus(train.observedAt,now)!=='fresh') throw new Error('최근 수신된 일반 열차를 다시 선택해 주세요.');
+  if(!train || train.lineId!=='2' || !['INNER','OUTER'].includes(train.direction) || !clean(train.trainId,64) || train.express!==false || !validTime(train.observedAt) || observationStatus(train.observedAt,now)!=='fresh') throw new Error('최근 수신된 일반 열차를 다시 선택해 주세요.');
   if(!station(previousStation)||!station(destinationStation)||previousStation.trim()===destinationStation.trim()) throw new Error('서로 다른 이전역과 도착역을 입력해 주세요.');
 }
-function validateFcmToken(fcmToken){if(typeof fcmToken!=='string'||!fcmToken.trim()||fcmToken.length>4096)throw new Error('Android FCM 등록 토큰이 없습니다. Firebase 설정을 확인하세요.');}
+function validateFcmToken(fcmToken){if(!clean(fcmToken,4096))throw new Error('Android FCM 등록 토큰이 없습니다. Firebase 설정을 확인하세요.');}
 async function startMonitor(server,{id,sessionToken,train,previousStation,destinationStation,fcmToken,accessToken},development=false,fetchImpl,now=Date.now()){
  const base=validateServerUrl(server,development);validateSelection(train,previousStation,destinationStation,now);
  const key=validateAccessToken(accessToken);

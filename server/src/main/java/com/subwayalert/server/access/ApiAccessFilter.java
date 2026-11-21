@@ -24,6 +24,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public final class ApiAccessFilter extends OncePerRequestFilter {
+  public static final String CREATION_BUDGET = "com.subwayalert.server.access.creationBudget";
   private final List<byte[]> tokenHashes;
   private final ApiRateLimits limits;
 
@@ -60,6 +61,11 @@ public final class ApiAccessFilter extends OncePerRequestFilter {
     retry=limits.authenticated(key,request.getMethod(),route);
     if(retry>0) { rateLimited(response,retry);return; }
     if(!canonicalPath(request.getRequestURI())) { reject(response,400,"API_INVALID_PATH");return; }
+    if("DELETE".equals(request.getMethod()) && route.startsWith("/api/monitor-sessions/")) {
+      // Only the session store can tell atomically whether this cancellation allocates a marker.
+      int authenticatedKey=key;
+      request.setAttribute(CREATION_BUDGET,(LongSupplier)()->limits.acquireCreation(authenticatedKey));
+    }
     chain.doFilter(request,response);
   }
 

@@ -1,6 +1,6 @@
 # Supabase 스키마 초안
 
-`migrations/drafts/schema.sql`은 **미적용·미검증 설계 초안**입니다. 실행 중인 앱/서버와 연결되어 있지 않으며 데이터베이스에 적용되지 않았습니다. 로컬 환경에 Supabase CLI, PostgreSQL 및 Docker가 없어 SQL 실행, 마이그레이션 적용, RLS 실제 테스트, 보안 advisors 검사는 수행하지 못했습니다. CLI로 생성된 마이그레이션 파일이 아닙니다. 적용하기 전에 Supabase CLI의 `supabase migration new`로 정식 파일을 생성한 뒤 내용을 검토하여 옮기고 격리된 로컬 Supabase에서 검증하세요. 기존 프로젝트가 있다면 충돌 및 기본 권한을 먼저 확인해야 합니다.
+`migrations/drafts/schema.sql`은 배포 전 설계 초안입니다. 저장소 루트에서 `python3 supabase/tests/test_schema.py -v`를 실행하면 Docker가 임시 PostgreSQL 17에서 사용자별 RLS, 즐겨찾기 슬롯의 동시 삽입, 세션·알림 소유자 제약, 사용자 삭제를 검사합니다. 테스트는 Supabase Auth 역할과 `auth.uid()`를 로컬에서 구성합니다. 실제 Supabase 프로젝트 연결과 Data API를 통한 JWT 검증은 별도 단계입니다. CLI로 생성된 마이그레이션 파일이 아닙니다. 적용하기 전에 Supabase CLI의 `supabase migration new`로 정식 파일을 생성한 뒤 내용을 검토하여 옮기고 격리된 로컬 Supabase에서 검증하세요. 기존 프로젝트가 있다면 충돌 및 기본 권한을 먼저 확인해야 합니다.
 
 - 즐겨찾기는 사용자별 1~5 슬롯과 `(user_id, slot)` 고유 제약으로 동시에 생성하더라도 5개를 초과할 수 없습니다. 클라이언트는 빈 슬롯을 골라 저장하며 충돌 시 다시 조회해야 합니다. 시간대는 `Asia/Seoul`로 해석하는 같은 날 시간 구간이며 자정을 넘기는 일정은 두 구간으로 나눠야 합니다. 비트 0은 월요일, 비트 6은 일요일입니다.
 - Supabase Auth의 `auth.uid()` 기준으로 본인 즐겨찾기만 읽고 수정할 수 있습니다. 추적 세션과 알림 기록은 본인만 읽고 신뢰할 수 있는 서버만 쓰도록 설계했습니다. 서버는 사용자의 JWT를 검증하고 소유권을 확인해야 합니다. `service_role`은 RLS를 우회하므로 앱에 절대 넣지 마세요. 이 초안은 Android 로그인·서버 JWT 인증을 구현하지 않습니다.

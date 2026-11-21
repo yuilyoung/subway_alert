@@ -4,7 +4,9 @@
 !src/
 !src/**
 src/**/google-services.json
+src/**/*-firebase-adminsdk-*.json
 src/**/*service-account*.json
+src/**/serviceAccountKey.json
 src/**/*credentials*.json
 src/**/*.pem
 src/**/*.key

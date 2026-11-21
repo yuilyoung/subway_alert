@@ -1,6 +1,6 @@
 package com.subwayalert.server.monitor;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.subwayalert.server.access.ApiAccessFilter;
 import com.subwayalert.server.live.SeoulTrainProvider;
 import com.subwayalert.server.push.NotificationGateway;

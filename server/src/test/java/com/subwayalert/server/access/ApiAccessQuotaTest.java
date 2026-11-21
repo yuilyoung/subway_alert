@@ -136,7 +136,7 @@ class ApiAccessQuotaTest {
   private static void assertLimited(MockHttpServletResponse response,String retry) throws Exception {
     assertEquals(429,response.getStatus());assertEquals(retry,response.getHeader("Retry-After"));
     assertEquals("application/json;charset=UTF-8",response.getContentType());
-    assertEquals("API_RATE_LIMITED",new com.fasterxml.jackson.databind.ObjectMapper().readTree(response.getContentAsString()).path("error").asText());
+    assertEquals("API_RATE_LIMITED",new tools.jackson.databind.ObjectMapper().readTree(response.getContentAsString()).path("error").asText());
     assertFalse(response.getContentAsString().contains(KEY));
   }
   static final class MutableClock extends Clock {

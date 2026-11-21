@@ -1,7 +1,7 @@
 package com.subwayalert.server.monitor;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.subwayalert.server.access.ApiAccessFilter;
 import com.subwayalert.server.live.SeoulTrainProvider;
 import com.subwayalert.server.push.NotificationGateway;
@@ -49,7 +49,7 @@ class MonitorRegistrationRecoveryTest {
       public Result send(String token,String previous,String destination,String mode){sends.incrementAndGet();return Result.ACCEPTED;}
     },clock,600);
     final MockMvc mvc=MockMvcBuilders.standaloneSetup(new MonitorController(service))
-      .setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(new ObjectMapper().findAndRegisterModules().disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)))
+      .setMessageConverters(new org.springframework.http.converter.json.JacksonJsonHttpMessageConverter())
       .addFilters(new ApiAccessFilter(API_KEY,elapsed::get,clock)).build();
     ResultActions perform(MockHttpServletRequestBuilder request) throws Exception {
       // Keep the real quota filter, moving only its elapsed-time input between ordinary requests.
@@ -139,6 +139,15 @@ class MonitorRegistrationRecoveryTest {
     f.start(ID,SECRET,BODY).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRACKING")).andExpect(jsonPath("$.expiresAt").value("2026-10-27T17:00:00Z"));
   }
 
+  @Test void lookupAndManualTestForgetSessionAtRetentionBoundaryWithoutAnotherPoll() throws Exception {
+    var f=new Fixture();f.created();f.clock.advance(10799);
+    f.lookup(ID,SECRET).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("EXPIRED"));
+    f.clock.advance(1);
+    f.lookup(ID,SECRET).andExpect(status().isNotFound());
+    f.perform(post("/api/monitor-sessions/"+ID+"/test").header("X-Session-Token",SECRET)).andExpect(status().isNotFound());
+    assertEquals(0,f.sends.get());
+  }
+
   @Test void cancellationBeforeRegistrationCreatesAuthorizedTombstoneAndBlocksLateStart() throws Exception {
     var f=new Fixture();
     f.cancel(ID,SECRET).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED")).andExpect(jsonPath("$.expiresAt").value("2026-10-27T14:00:00Z"));
@@ -170,6 +179,21 @@ class MonitorRegistrationRecoveryTest {
     f.lookup(ID,SECRET).andExpect(status().isOk()).andExpect(jsonPath("$.sessionToken").doesNotExist()).andExpect(jsonPath("$.fcmToken").doesNotExist());
     f.cancel(ID,OTHER_SECRET).andExpect(status().isNotFound());
     f.lookup(ID,SECRET).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRACKING"));
+  }
+
+  @Test void retiredServerIssuedSessionCanBeClearedAfterUpgradeWithoutReservingItsUuid() throws Exception {
+    var f=new Fixture();
+    String legacySecret=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
+    f.mvc.perform(delete("/api/monitor-sessions/"+ID).header("X-Session-Token",legacySecret)).andExpect(status().isUnauthorized());
+    f.lookup(ID,legacySecret).andExpect(status().isNotFound());
+    f.cancel(ID,legacySecret).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(ID))
+        .andExpect(jsonPath("$.status").value("CANCELLED")).andExpect(jsonPath("$.mode").value("TEST"))
+        .andExpect(jsonPath("$.expiresAt").value("2026-10-27T12:00:00Z"));
+    f.lookup(ID,legacySecret).andExpect(status().isNotFound());
+    f.created();
+    f.cancel(ID,legacySecret).andExpect(status().isNotFound());
+    f.lookup(ID,SECRET).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRACKING"));
+    assertEquals(0,f.sends.get());
   }
 
   @Test void fullCapacityStillReplaysAndCancelsExistingSessionButRejectsNewEntries() throws Exception {
@@ -217,5 +241,20 @@ class MonitorRegistrationRecoveryTest {
     f.mvc.perform(post("/api/monitor-sessions").header("Idempotency-Key",ID).header("X-Session-Token",SECRET).contentType("application/json").content(BODY)).andExpect(status().isUnauthorized());
     for(int i=0;i<3;i++)f.mvc.perform(post("/api/monitor-sessions").header("Authorization","Bearer "+API_KEY).header("Idempotency-Key",ID).header("X-Session-Token",SECRET).contentType("application/json").content(BODY)).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(ID));
     f.mvc.perform(post("/api/monitor-sessions").header("Authorization","Bearer "+API_KEY).header("Idempotency-Key",ID).header("X-Session-Token",SECRET).contentType("application/json").content(BODY)).andExpect(status().isTooManyRequests());
+  }
+
+  @Test void creatingCancellationMarkersUsesCreationQuotaWhileExistingSessionsCanAlwaysBeCancelled() throws Exception {
+    var f=new Fixture();f.created();
+    for(int i=0;i<2;i++) {
+      f.mvc.perform(delete("/api/monitor-sessions/"+UUID.randomUUID()).header("Authorization","Bearer "+API_KEY)
+          .header("X-Session-Token",SECRET)).andExpect(status().isOk());
+    }
+    String next=UUID.randomUUID().toString();
+    f.mvc.perform(delete("/api/monitor-sessions/"+next).header("Authorization","Bearer "+API_KEY)
+        .header("X-Session-Token",SECRET)).andExpect(status().isTooManyRequests())
+        .andExpect(header().string("Retry-After","20")).andExpect(jsonPath("$.error").value("API_RATE_LIMITED"));
+    f.mvc.perform(delete("/api/monitor-sessions/"+ID).header("Authorization","Bearer "+API_KEY)
+        .header("X-Session-Token",SECRET)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED"));
+    f.lookup(next,SECRET).andExpect(status().isNotFound());
   }
 }

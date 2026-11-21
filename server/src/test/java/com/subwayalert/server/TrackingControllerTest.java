@@ -1,11 +1,11 @@
 package com.subwayalert.server;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -17,7 +17,7 @@ class TrackingControllerTest {
   @org.springframework.boot.test.context.TestConfiguration
   static class AuthDefaults {
     @org.springframework.context.annotation.Bean
-    org.springframework.boot.test.autoconfigure.web.servlet.MockMvcBuilderCustomizer authDefaults() {
+    org.springframework.boot.webmvc.test.autoconfigure.MockMvcBuilderCustomizer authDefaults() {
       return builder->builder.defaultRequest(get("/").header("Authorization","Bearer abcdefghijklmnopqrstuvwxyzABCDEF"));
     }
   }

@@ -20,5 +20,13 @@
     "expo-task-manager": "~14.0.0",
     "react": "19.1.0",
     "react-native": "0.81.5"
+  },
+  "overrides": {
+    "@expo/metro-config": {
+      "postcss": "8.5.32"
+    },
+    "glob@13": "14.0.6",
+    "minimatch@9 || 10": "11.0.9",
+    "@expo/metro@54.2.0": "55.1.2"
   }
 }

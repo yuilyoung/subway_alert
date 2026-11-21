@@ -1,6 +1,6 @@
 package com.subwayalert.server.live;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.time.Instant;
@@ -24,6 +24,27 @@ class SeoulTrainProviderTest {
     assertThrows(SeoulTrainProvider.ProviderException.class,()->SeoulTrainProvider.parse("{\"errorMessage\":{\"code\":\"ERROR-300\"}}",new ObjectMapper(),Instant.now()));
     assertThrows(SeoulTrainProvider.ProviderException.class,()->SeoulTrainProvider.parse(RESPONSE.replace("2026-10-27 21:52:00","bad"),new ObjectMapper(),Instant.now()));
     assertThrows(SeoulTrainProvider.ProviderException.class,()->SeoulTrainProvider.parse(RESPONSE.replace("1002","1001"),new ObjectMapper(),Instant.now()));
+  }
+  @Test void rejectsNullTrainOrStationInsteadOfTreatingThemAsNames(){
+    for(String field : java.util.List.of("\"1234\"", "\"강남\"")){
+      assertThrows(SeoulTrainProvider.ProviderException.class, () ->
+          SeoulTrainProvider.parse(RESPONSE.replace(field, "null"),new ObjectMapper(),Instant.now()));
+    }
+  }
+  @Test void enforcesByteLimitAcrossChunksBeforeCompletion(){
+    var cancelled=new java.util.concurrent.atomic.AtomicBoolean();
+    var subscription=new java.util.concurrent.Flow.Subscription(){
+      public void request(long count){}
+      public void cancel(){cancelled.set(true);}
+    };
+    var body=new SeoulTrainProvider.LimitedBody(4);
+    body.onSubscribe(subscription);
+    body.onNext(java.util.List.of(java.nio.ByteBuffer.wrap(new byte[3])));
+    assertFalse(cancelled.get());
+    body.onNext(java.util.List.of(java.nio.ByteBuffer.wrap(new byte[2])));
+    assertTrue(cancelled.get());
+    var error=assertThrows(java.util.concurrent.CompletionException.class,()->body.getBody().toCompletableFuture().join());
+    assertInstanceOf(SeoulTrainProvider.ProviderException.class,error.getCause());
   }
   @Test void neverSendsLiveSecretsOverHttpOrOtherHosts(){
     assertThrows(IllegalArgumentException.class,()->SeoulTrainProvider.endpoint(URI.create("http://swopenapi.seoul.go.kr"),"private",0,5));
