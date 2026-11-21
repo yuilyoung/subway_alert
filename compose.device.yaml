@@ -1,0 +1,22 @@
+# Opt-in Mac/Android device test. Use with compose.yaml (Compose 2.24.4+).
+services:
+  backend:
+    image: subway-alert-backend:device-test
+    ports: !override
+      - target: 8080
+        published: "18080"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    environment:
+      SUBWAY_API_TOKENS: "${SUBWAY_API_TOKENS:?Generate a private tester key file}"
+      FCM_ENABLED: "true"
+      FIREBASE_PROJECT_ID: "${DEVICE_FIREBASE_PROJECT_ID:?Set the Firebase project ID}"
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+      SEOUL_SUBWAY_KEY: "${DEVICE_SEOUL_SUBWAY_KEY:-sample}"
+    volumes:
+      - type: bind
+        source: "${DEVICE_FIREBASE_CREDENTIALS_FILE:?Set the absolute service account file path}"
+        target: /run/secrets/firebase-admin.json
+        read_only: true
+        bind:
+          create_host_path: false

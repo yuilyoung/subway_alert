@@ -35,7 +35,7 @@ Python 3 생성 도구는 기본 키 1개, `--count 2`처럼 1~20개의 참가�
 
 Dockerfile은 Maven에서 테스트와 패키징을 수행한 뒤 JRE 이미지에서 UID 10001의 일반 사용자로 실행합니다. 런타임 파일 시스템은 읽기 전용이고 임시 파일은 제한된 `/tmp`를 사용합니다. 현재 이미지 태그는 주요 런타임 버전을 지정한 태그이며 불변 digest로 고정되지는 않았습니다. 운영 릴리스 전에 실제 빌드 검증과 함께 승인한 이미지 digest 및 취약점 검사를 기록해야 합니다.
 
-로컬 Compose는 공개 `sample` 키만 사용하고 FCM을 끕니다. Firebase 서비스 계정 키나 실제 서울 API 키를 이미지, Git, 앱 또는 `.env.example`에 넣지 않습니다. FCM 시험은 [서버 설정](../server/README.md)의 운영자 설정을 별도로 준비한 뒤 비밀 저장소나 읽기 전용 자격 증명 마운트를 사용하도록 확장해야 합니다. 현재 Compose에 해당 설정은 자동 포함되지 않습니다.
+기본 Compose는 공개 `sample` 키만 사용하고 FCM을 끕니다. Mac에서 Android 기기로 시험할 때는 별도 `compose.device.yaml`을 함께 적용해 서버 자격 증명을 읽기 전용으로 연결할 수 있습니다. Firebase TEST 수신과 서울 실키 조회는 각각 확인합니다. [Mac·Android 실기기 시험](device-test.md)
 
 ## 독립 Docker 실행 검사
 

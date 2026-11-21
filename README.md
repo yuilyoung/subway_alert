@@ -8,12 +8,12 @@
 
 | 구성 | 역할 | 개발·운영 기준 | 실제 상태 |
 | --- | --- | --- | --- |
-| 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | CI #20의 실제 이미지·기동·인증·재시작·정리 통과, 개발 PC 재현 미실시 |
+| 개발 백엔드 호스트 | Spring Boot API·폴링·FCM 실행 | 개인 PC의 Docker 컨테이너 | CI에서 AMD64·ARM64 이미지 기동·인증·재시작 검사 통과 |
 | Cloudflare Tunnel | 실행 중인 API를 HTTPS 주소로 연결 | 개발 기기 검증용 연결 수단 | 계정·도메인·터널 미구성, 템플릿만 작성 |
 | 운영 백엔드 호스트 | API·스케줄러 24시간 실행 | 상시 실행 Linux 서버 + Docker | VPS 업체·리전·요금 미선정, 서버 미생성 |
 | Supabase | 향후 PostgreSQL 영속 저장 | 운영 데이터 저장 목표 | 이 앱에 연결할 프로젝트 미확정, 스키마 초안 미적용 |
 | Firebase FCM | Android 원격 푸시 전달 | 시험 알림 전송 코드 구현 | 실제 자격 증명·기기 수신 미검증 |
-| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | CI #17의 시험 APK 성공, CI #20의 Docker 작업 성공 |
+| GitHub Actions | 테스트·Android 설치 파일 생성 | 시험 APK를 Artifact로 제공 | push에서 기본 APK, 수동 실행에서 Firebase 설정을 포함한 시험 APK 선택 가능 |
 | Google Play | 앱 설치·업데이트 유통 | Android 정식 배포처 | 계정·앱 등록·심사 미진행 |
 | APK 직접 설치 | 소수 개발자의 기기 시험 | 정식 출시 전 내부 시험 | 독립 ARM64 시험 APK 빌드·서명 검사 완료 |
 
@@ -94,14 +94,14 @@ npx expo run:android
 | 독립 시험 APK | CI의 Standalone Android test APK (ARM64, debug signed) 작업 | JS 내장·ARM64·Debug 키 서명·Artifact 14일 보관 |
 | 정식 출시 | 정식 업로드 키로 서명한 AAB → Play Console | 계정·Firebase 설정·스토어 자료·정책 심사·실기기 검증 필요 |
 
-CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하더라도 현재 Debug 키로 서명한 APK는 정식 출시 파일이 아닙니다. [접근 보호 CI #17 검증 결과](https://github.com/yuilyoung/subway_alert/actions/runs/40525199870)에서 기존 3개 작업과 시험 APK 생성이 성공했습니다. 이 실행에는 새 Docker 작업이 포함되지 않았고, 실제 Android 설치·FCM 수신은 검증하지 않았습니다.
+CI의 APK는 내부 시험용 Debug 키로 서명합니다. 코드 리뷰 수정본에서 모바일·서버 테스트, AMD64·ARM64 Docker 기동, 독립 APK 생성과 서명 검사가 통과했습니다. Android 실기기 설치와 FCM 수신은 별도로 확인합니다. [CI #45 검증 결과](https://github.com/yuilyoung/subway_alert/actions/runs/44915386326)
 
 ## 필요한 계정과 비밀 설정
 
 | 필요한 항목 | 설정 위치 | 상태 |
 | --- | --- | --- |
 | 시험 참가자별 API 키 | 서버 SUBWAY_API_TOKENS와 기기 SecureStore | 생성 도구 제공, 운영자가 별도 전달·회수 |
-| Firebase Android google-services.json | 빌드 PC 파일과 GOOGLE_SERVICES_JSON 경로 | 미제공, 포함해 네이티브 재빌드 필요 |
+| Firebase Android 앱 설정 | 로컬 `GOOGLE_SERVICES_JSON` 또는 Actions secret `FIREBASE_ANDROID_CONFIG_BASE64` | FCM 시험 빌드에서만 적용 |
 | Firebase 프로젝트 ID·서버 ADC | 백엔드 비밀 설정, FCM_ENABLED 기본 false | 실제 전송 미검증 |
 | 서울 실시간 API 키 | 서버 SEOUL_SUBWAY_KEY | 샘플만 검증, 실키 HTTPS 미검증 |
 | Cloudflare 계정·도메인·터널 자격 증명 | 운영자 PC/서버 비밀 저장소 | 미구성 |
@@ -121,6 +121,6 @@ CI는 Play에 자동 게시하지 않습니다. 릴리스 변형으로 빌드하
 
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
 
-다음 순서는 개발 PC Docker 실행 재현 → Firebase 설정 후 앱 재빌드 → 인증된 개발용 HTTPS 터널 → 실키·경로·시간·기기 검증 → DB·재시작 복구 → VPS 업체·예산 확정 → Google Play 출시입니다.
+다음 단계는 [실기기 시험 안내](docs/device-test.md)에 따라 Android 휴대폰에서 시험 알림 도착을 확인하고, 서울 API 실키로 열차 조회를 검증하는 것입니다. [코드 리뷰와 검증 결과](docs/verification-2026-11-21.md)에는 자동화한 검사와 실기기 검증 범위가 정리돼 있습니다.
 
 감시 등록은 ID·세션 비밀을 기기에 먼저 보관해 응답 유실 뒤 같은 요청을 조회·재시도·종료하도록 구현합니다. 오래된 관측의 재등록과 앱 복원 시 자동 POST는 차단합니다. 새 필수 등록 헤더가 포함된 앱 빌드가 필요하며 프로세스 재시작·다중 인스턴스 복구는 후속 작업입니다. [등록 응답 유실과 복구](docs/registration-recovery.md)를 참고하세요.

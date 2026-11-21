@@ -7,9 +7,9 @@
 | 모바일 단위·모듈 | Node 24에서 72개 통과. 깨끗한 설치 후 경로·시간·위치 배치 처리, 등록 복구, 키 교체, 저장 오류, 중복 작업을 검사했다. |
 | 서버 단위·모듈·HTTP 통합 | JDK 17에서 `mvn clean verify` 77개 통과. 감시 등록·취소 경쟁, 중복 방지, 보관 기한, 인증·호출 한도, 한국어 JSON의 64 KiB 경계와 청크 전송, 응답·로그에 입력값이 노출되지 않는지 검사했다. 독립 TrackingEngine 검사는 14개다. |
 | 모바일 ↔ 서버 | 패키징한 JAR을 루프백에서 기동하고 앱의 등록 코드를 실제 HTTP로 호출했다. 등록 응답 유실 후 같은 ID로 재시도, 조회, FCM 비활성 응답, 취소, 구버전 앱의 세션 정리를 확인했다. 이 검사에서 SecureStore는 메모리 저장소로 대체했다. |
-| Docker·배포 | Python 검사 28개 통과. Linux AMD64 Docker에서 빌드, 초기 설정과 인증, 재시작까지 7개 단계와 자원 정리를 확인했다. 클라우드 빌드에만 임시 프록시 설정과 신뢰 인증서를 주입했다. Java 빌드·실행 이미지에 ARM64 매니페스트가 있고 CI에 ARM64 전용 실행을 추가했다. |
+| Docker·배포 | 리뷰 시점의 Python 검사 28개가 통과했다. Linux AMD64 Docker에서 빌드, 초기 설정과 인증, 재시작까지 7개 단계와 자원 정리를 확인했다. GitHub CI에서도 AMD64·ARM64 러너가 각각 이미지를 빌드하고 같은 검사를 통과했다. |
 | 데이터베이스 | 격리된 PostgreSQL 17에서 테스트 3개 통과. 모의 Supabase 역할로 소유자만 즐겨찾기를 수정·삭제하고 알림을 읽는지, 동시 슬롯 생성 시 한 요청만 성공하는지, 사용자 삭제 시 자식 행을 지우는지 검사했다. |
-| Android | Android SDK·NDK로 Expo prebuild 및 Gradle 릴리스 Hermes 번들을 점검했다. ARM64 APK 조립 중 Maven Central이 React Native/Hermes 0.81.5 AAR 다운로드를 `repo.reactnative.dev`로 리디렉션했고 클라우드 프록시가 HTTP 403을 반환했다. |
+| Android | 클라우드에서 Android SDK·NDK로 Expo prebuild와 Gradle 릴리스 Hermes 번들을 확인했다. 이 환경의 APK 조립은 `repo.reactnative.dev`에서 AAR 다운로드 시 HTTP 403으로 중단됐다. GitHub CI에서는 같은 커밋의 ARM64 독립 APK를 빌드하고 서명과 내장 JS 번들을 확인했다. [CI #45](https://github.com/yuilyoung/subway_alert/actions/runs/44915386326) |
 
 ## 수정과 재검토
 
@@ -37,4 +37,4 @@ python3 supabase/tests/test_schema.py -v
 python3 deploy/smoke_compose.py --report artifacts/docker-smoke.json
 ```
 
-실기기의 화면 꺼짐·재부팅·푸시 도착, 실키 서울 API, 운영 Supabase Auth, 네이티브 ARM64 서버 실행은 이번 검증 범위 밖이다. Android가 알림 예약을 수락하고 앱이 완료 상태를 저장하기 전에 프로세스가 종료되면 중복 알림이 가능하다. 서버의 세션·한도는 프로세스 메모리에 있어 서버 재시작과 여러 인스턴스에 걸친 복구를 보장하지 않는다.
+실기기의 화면 꺼짐·재부팅·푸시 도착, 실키 서울 API, 운영 Supabase Auth는 추가 검증이 필요하다. Android가 알림 예약을 수락하고 앱이 완료 상태를 저장하기 전에 프로세스가 종료되면 중복 알림이 가능하다. 서버의 세션·한도는 프로세스 메모리에 있어 서버 재시작과 여러 인스턴스에 걸친 복구를 보장하지 않는다. [Mac·Android 실기기 시험 절차](device-test.md)

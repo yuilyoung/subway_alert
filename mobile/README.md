@@ -34,3 +34,15 @@ Metro 개발 모드(`__DEV__`가 true)에서는 에뮬레이터에서 PC 서버�
 호출 예산은 프로세스 전체 600회/분, 키별 60회/분, 세션 생성 키별 3회/분입니다. 직접 열차 조회는 모든 키가 6회/분·서울 날짜 하루 240회를 공유합니다. 시험 감시 폴링은 별도 하루 600회로 sample 모드에서 합계 최대 840회/일/프로세스입니다. 앱을 다시 설치하거나 다른 기기를 쓰더라도 서버 키별·전체 예산을 늘려 주지 않으며 서버 재시작·복제 시 예산은 초기화·증가합니다. 운영 과금 제어는 아닙니다.
 
 직접 조회 240회는 클라이언트 요청의 허용 횟수입니다. 실키 LIVE 조회 한 번은 최대 5페이지의 서울 API 호출을 수행할 수 있어 외부 호출 840회 상한은 sample 모드에만 해당합니다. 실키의 통합 외부 호출 예산은 후속 구현이 필요합니다.
+
+### GitHub Actions에서 Firebase 시험 APK 만들기
+
+Firebase 콘솔에서 Android 패키지 `com.yuilyoung.subwayalert`용 `google-services.json`을 내려받습니다. Windows PowerShell에서 아래 명령을 실행하면 파일의 Base64 값을 화면에 표시하지 않고 해당 저장소의 Actions secret `FIREBASE_ANDROID_CONFIG_BASE64`에 저장합니다. GitHub CLI로 로그인하고 파일 경로를 실제 경로로 바꿔 주세요.
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\Firebase\google-services.json')) | gh secret set FIREBASE_ANDROID_CONFIG_BASE64 --repo yuilyoung/subway_alert
+```
+
+GitHub의 **Actions → CI → Run workflow**에서 검토한 브랜치를 고르고 **Include Firebase Android client configuration in the internal test APK**를 선택합니다. 해당 패키지의 Firebase 프로젝트 번호·ID, Android 앱 ID, 클라이언트 API 키만 APK에 포함되며 앱을 받은 사람이 이 값을 확인할 수 있습니다. 서버 서비스 계정 JSON과 서울 API 키는 서버에서만 관리합니다. 입력이 없거나 패키지·형식이 맞지 않으면 Firebase 빌드가 실패합니다.
+
+완료 후 `subway-alert-firebase-test-arm64-<run_number>` 아티팩트에서 APK를 받습니다. 자동 push·PR 빌드와 옵션을 끈 수동 빌드는 기존 `subway-alert-test-arm64-<run_number>`를 생성합니다. 두 빌드 모두 내부 시험용 Debug 서명 APK입니다. 실제 FCM 수신 확인에는 같은 프로젝트의 서버 자격 증명, 앱에서 접근 가능한 HTTPS 서버, 알림 권한을 허용한 Android 기기가 필요합니다.
