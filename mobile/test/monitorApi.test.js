@@ -36,11 +36,49 @@ test('test result preserves only recognized delivery and polling states',async()
  assert.equal(out.deliveryStatus,'FCM_ACCEPTED');assert.equal(out.pollStatus,'SAMPLE_PARTIAL');
  await assert.rejects(()=>monitorRequest('https://example.com',sess,'status',false,async()=>reply({id:ID,mode:'TEST',expiresAt:'2026-10-27T02:00:00Z',status:'TRACKING',deliveryStatus:'SECRET',pollStatus:'SAMPLE_PARTIAL'})));
 });
+test('only a confirmed FCM acceptance with a valid timestamp supplies an acceptance time',async()=>{
+ const session={...identity,server:'https://example.com',accessToken:KEY};
+ const stamp='2026-10-27T00:00:01Z';
+ async function state(deliveryStatus,deliveryAcceptedAt){
+  return monitorRequest(session.server,session,'status',false,async()=>reply({
+    id:ID,mode:'TEST',status:'TRACKING',expiresAt:'2026-10-27T02:00:00Z',deliveryStatus,deliveryAcceptedAt,
+  }));
+ }
+ assert.equal((await state('FCM_ACCEPTED',stamp)).deliveryAcceptedAt,stamp);
+ assert.equal((await state('FCM_ACCEPTED',undefined)).deliveryAcceptedAt,null);
+ assert.equal((await state('FAILED',stamp)).deliveryAcceptedAt,null);
+ await assert.rejects(()=>state('FCM_ACCEPTED','unknown time'),/응답 형식/);
+});
 test('Firebase configuration is opt-in at build time',()=>{
  const config=require('../app.config');const original=process.env.GOOGLE_SERVICES_JSON;
  try {delete process.env.GOOGLE_SERVICES_JSON;assert.equal(config({config:{android:{package:'com.yuilyoung.subwayalert'}}}).android.googleServicesFile,undefined);
  process.env.GOOGLE_SERVICES_JSON='/private/google-services.json';assert.equal(config({config:{android:{package:'com.yuilyoung.subwayalert'}}}).android.googleServicesFile,'/private/google-services.json');}
  finally {if(original===undefined)delete process.env.GOOGLE_SERVICES_JSON;else process.env.GOOGLE_SERVICES_JSON=original;}
+});
+test('manual push errors preserve the session and distinguish cooldown, conflict and uncertain delivery',async()=>{
+ const session={...identity,server:'https://example.com',accessToken:KEY};
+ const send=transport=>monitorRequest(session.server,session,'test',false,transport);
+ let calls=0;
+ await assert.rejects(send(async()=>{calls++;return {...reply({},429),headers:{get:()=> '12'}};}),
+   e=>e.status===429&&e.retryAfter===12&&/12초/.test(e.message));
+ await assert.rejects(send(async()=>{calls++;return reply({},409);}),
+   e=>e.status===409&&/상태/.test(e.message)&&!/등록|종료하세요/.test(e.message));
+ await assert.rejects(send(async()=>{calls++;throw Error('lost response');}),
+   e=>/전송.*수 있습니다/.test(e.message)&&/상태/.test(e.message)&&!/재시도|등록/.test(e.message));
+ assert.equal(calls,3);
+});
+test('manual push is available only for a tracking session outside its own retry window',()=>{
+ const {canSendTestNotification}=require('../src/monitorApi');
+ const session={...identity,phase:'ACTIVE'},tracking={status:'TRACKING',deliveryStatus:'UNAVAILABLE'};
+ const retry={id:ID,until:now+30000};
+ assert.ok(canSendTestNotification(session,tracking,retry,now+30000));
+ assert.ok(!canSendTestNotification(session,tracking,retry,now+29999));
+ assert.ok(canSendTestNotification(session,tracking,{...retry,id:'previous-session'},now));
+ for(const status of ['SAMPLE_MATCHED','CANCELLED','EXPIRED'])
+   assert.ok(!canSendTestNotification(session,{...tracking,status},null,now));
+ assert.ok(!canSendTestNotification(session,{...tracking,deliveryStatus:'SENDING'},null,now));
+ assert.ok(!canSendTestNotification({...session,phase:'PENDING'},tracking,null,now));
+ assert.ok(!canSendTestNotification(session,null,null,now));
 });
 test('monitor requests require an explicit redirect-safe transport',async()=>{
  await assert.rejects(()=>startMonitor('https://example.com',{...identity,train,previousStation:'선릉',destinationStation:'삼성',fcmToken:'token',accessToken:KEY},false,undefined,now),/전송/);

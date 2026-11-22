@@ -26,11 +26,17 @@ async function monitorRequest(server,session,action,development=false,fetchImpl,
  if(!session||!UUID4.test(session.id||'')||typeof session.sessionToken!=='string'||!/^[A-Za-z0-9_-]{1,512}$/.test(session.sessionToken)||!['status','test','cancel'].includes(action)) throw new Error('시험 감시 정보가 올바르지 않습니다.');
  if(base!==validateServerUrl(session.server,development))throw new Error('등록한 감시 서버와 요청 서버가 다릅니다.');
  const path=action==='test'?'/test':'',method=action==='test'?'POST':action==='cancel'?'DELETE':'GET';
- const data=await requestJson(base,`/api/monitor-sessions/${session.id}${path}`,{method,headers:{'X-Session-Token':session.sessionToken}},accessToken,development,fetchImpl);
+ const data=await requestJson(base,`/api/monitor-sessions/${session.id}${path}`,{method,headers:{'X-Session-Token':session.sessionToken}},accessToken,development,fetchImpl,action);
  if(!data||data.id!==session.id||!STATES.includes(data.status)||data.mode!=='TEST'||!validTime(data.expiresAt))throw new Error('서버 응답 형식이 올바르지 않습니다.');
  const deliveryStatus=data.deliveryStatus??'NONE',pollStatus=data.pollStatus??'NOT_POLLED';
  if(!['NONE','SENDING','FCM_ACCEPTED','UNAVAILABLE','FAILED'].includes(deliveryStatus)||!['NOT_POLLED','SAMPLE_PARTIAL','SOURCE_BLOCKED','PROVIDER_ERROR','DAILY_LIMIT'].includes(pollStatus))throw new Error('서버 응답 형식이 올바르지 않습니다.');
- return {status:data.status,mode:'TEST',expiresAt:data.expiresAt||null,deliveryStatus,pollStatus};
+ const deliveryAcceptedAt=deliveryStatus==='FCM_ACCEPTED'?(data.deliveryAcceptedAt??null):null;
+ if(deliveryAcceptedAt!==null&&!validTime(deliveryAcceptedAt))throw new Error('서버 응답 형식이 올바르지 않습니다.');
+ return {status:data.status,mode:'TEST',expiresAt:data.expiresAt,deliveryStatus,deliveryAcceptedAt,pollStatus};
+}
+function canSendTestNotification(session,view,retry,now=Date.now()){
+ return session?.phase==='ACTIVE' && view?.status==='TRACKING' && view.deliveryStatus!=='SENDING'
+   && !(retry?.id===session.id && now<retry.until);
 }
 async function cancelStaleSession(session,development,fetchImpl,deleteStored,accessToken=session?.accessToken){
  const result=await monitorRequest(session.server,session,'cancel',development,fetchImpl,accessToken);
@@ -55,4 +61,4 @@ async function startConfirmedMonitor(confirmed,getCurrentConnection,selection,de
  const created=await startMonitor(confirmed.server,{...selection,...identity,fcmToken,accessToken:confirmed.accessToken},development,fetchImpl,now());
  return {created,fcmToken};
 }
-module.exports={UUID4,SECRET,STATES,validTime,validateSelection,startMonitor,monitorRequest,needsRegistration,cancelStaleSession,startConfirmedMonitor};
+module.exports={UUID4,SECRET,STATES,validTime,validateSelection,startMonitor,monitorRequest,canSendTestNotification,needsRegistration,cancelStaleSession,startConfirmedMonitor};

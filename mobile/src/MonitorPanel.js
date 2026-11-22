@@ -4,7 +4,7 @@ import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import {fetch as expoFetch} from 'expo/fetch';
-const {monitorRequest,validateSelection,needsRegistration}=require('./monitorApi');
+const {monitorRequest,validateSelection,needsRegistration,canSendTestNotification}=require('./monitorApi');
 const {sessionAccessToken}=require('./connectionStore');
 const {createRegistrationFlow}=require('./registrationFlow');
 const statusLabels={TRACKING:'시험 감시 중',SAMPLE_MATCHED:'공개 샘플 조건 일치 · 실제 하차 아님',CANCELLED:'종료됨',EXPIRED:'만료됨'};
@@ -25,12 +25,22 @@ async function deviceToken(){
 function Button({title,onPress,disabled}){return <TouchableOpacity disabled={disabled} accessibilityRole="button" onPress={onPress} style={[styles.button,disabled&&styles.disabled]}><Text style={styles.buttonText}>{title}</Text></TouchableOpacity>}
 export default function MonitorPanel({connection,train,sourceMode}){
  const [previous,setPrevious]=useState(''),[destination,setDestination]=useState('');
+ const [testRetry,setTestRetry]=useState(null);
  const [session,setSession]=useState(null),[view,setView]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[ready,setReady]=useState(false),[tokenChanged,setTokenChanged]=useState(false),[storageBlocked,setStorageBlocked]=useState(false);
  const lock=useRef(false),tokenRef=useRef(null),sessionRef=useRef(null),latestEvent=useRef(null),autoCancelAttempt=useRef(null),connectionRef=useRef(connection);
  const flowRef=useRef(null);
  if(!flowRef.current)flowRef.current=createRegistrationFlow({secureStore:SecureStore,crypto:Crypto,fetchImpl:expoFetch,development:__DEV__,onChange:state=>{sessionRef.current=state.record;setSession(state.record);setReady(state.ready);setStorageBlocked(state.blocked);}});
  const flow=flowRef.current;
  connectionRef.current=connection;
+ useEffect(()=>{
+  if(!testRetry)return;
+  const delay=Math.min(1000,Math.max(0,testRetry.until-Date.now()));
+  const timer=setTimeout(()=>{
+   const seconds=Math.ceil((testRetry.until-Date.now())/1000);
+   setTestRetry(seconds>0?{...testRetry,seconds}:null);
+  },delay);
+  return ()=>clearTimeout(timer);
+ },[testRetry]);
  useEffect(()=>{
   let alive=true;
   (async()=>{try{const restored=await flow.restore();if(alive&&restored)setTokenChanged(needsRegistration(restored,null,null));}catch(e){if(alive)setError(e.message);}})();
@@ -76,8 +86,22 @@ export default function MonitorPanel({connection,train,sourceMode}){
   const current=sessionRef.current;if(!current)throw new Error('진행 중인 시험 감시가 없습니다.');
   if(type==='test'&&tokenChanged)throw new Error('기기 토큰이 바뀌었습니다. 기존 감시를 종료하고 다시 시작하세요.');
   if(type==='retry'&&tokenChanged)throw new Error('기기 토큰이 바뀌었거나 확인되지 않습니다. 기존 감시를 종료하고 다시 시작하세요.');
-  if(type==='test'&&current.phase==='PENDING')throw new Error('등록 결과를 먼저 조회해 주세요.');
-  const result=type==='cancel'?await flow.cancel(connectionRef.current):type==='retry'?await flow.retry(connectionRef.current):type==='status'?await flow.status(connectionRef.current):await monitorRequest(current.server,current,type,__DEV__,expoFetch,sessionAccessToken(current,connectionRef.current,__DEV__));setView(result);
+  if(type==='test'){
+   if(!canSendTestNotification(current,view,testRetry))return;
+   try{
+    const key=sessionAccessToken(current,connectionRef.current,__DEV__);
+    setView(await monitorRequest(current.server,current,'test',__DEV__,expoFetch,key));
+   }catch(e){
+    if(e.status===429&&e.retryAfter){
+     setTestRetry({id:current.id,until:Date.now()+1000*e.retryAfter,seconds:e.retryAfter});
+     return;
+    }
+    throw e;
+   }
+   return;
+  }
+  const result=type==='cancel'?await flow.cancel(connectionRef.current):type==='retry'?await flow.retry(connectionRef.current):await flow.status(connectionRef.current);
+  setView(result);
   if(type==='cancel'){sessionRef.current=null;setSession(null);tokenRef.current=null;setTokenChanged(false);
   }
  })}
@@ -88,7 +112,22 @@ export default function MonitorPanel({connection,train,sourceMode}){
   <Text style={styles.help}>Firebase 설정을 포함하여 앱을 다시 빌드해야 합니다. 서버의 FCM 설정도 필요합니다. 이전역과 도착역은 사용자 입력이며 실제 경로가 검증되지 않습니다.</Text>
   {!session&&<>{!connection&&<Text style={styles.help}>서버 주소와 API 키를 먼저 저장한 뒤 공개 샘플 열차를 선택해 주세요.</Text>}<TextInput accessibilityLabel="시험 이전역" style={styles.input} value={previous} onChangeText={setPrevious} placeholder="목적지 이전역 입력"/><TextInput accessibilityLabel="시험 도착역" style={styles.input} value={destination} onChangeText={setDestination} placeholder="목적지 입력"/><Button title="선택 열차로 시험 감시 시작" disabled={!ready||busy||storageBlocked||!connection||!train||sourceMode!=='SAMPLE'} onPress={confirmRegister}/></>}
   {storageBlocked&&<><Text style={styles.warning}>저장된 감시 정보를 읽지 못해 새 등록을 차단했습니다. 저장된 정보를 복원하기 전에는 다른 감시를 시작할 수 없습니다.</Text><Button title="저장된 감시 다시 읽기" disabled={busy} onPress={()=>run(async()=>{const restored=await flow.restore();if(restored)setTokenChanged(true);})}/></>}
-  {session&&<><Text style={styles.help}>새 시험 감시는 서버 주소·API 키·세션 토큰을 함께 안전하게 저장합니다. 서버 주소를 바꿔도 등록한 서버로만 조회·종료합니다. API 키가 없는 이전 세션이나 키를 교체한 세션은 같은 서버의 API 키를 저장해 주세요.</Text><Text style={styles.help}>상태: {statusLabels[view?.status]||'조회 필요'} · 만료: {view?.expiresAt||(typeof session.expiresAt==='string'&&session.expiresAt)||'확인 불가'}</Text><Text style={styles.help}>전송: {delivery[view?.deliveryStatus]||'조회 필요'}</Text><Text style={styles.help}>조회: {polling[view?.pollStatus]||'조회 필요'}</Text><Text style={styles.warning}>API 키가 회수되었거나 조회·종료에 실패하면 등록한 서버의 연결 주소와 API 키를 확인하세요. 종료 확인 전까지 저장된 감시 정보는 유지됩니다. 세션은 최대 2시간 후 만료됩니다.</Text>{tokenChanged&&<Text style={styles.warning}>기기 토큰 확인이 필요해 기존 감시를 자동 종료하려고 합니다. 종료 실패 시 기존 토큰으로 시험 알림이 전송될 수 있으니 서버 연결과 API 키를 확인하고 종료를 다시 시도하세요.</Text>}{session.phase==='PENDING'&&<><Text style={styles.warning}>등록 결과 확인 대기 중입니다. 같은 ID·비밀·원래 요청을 보관하며 새 감시 등록을 차단합니다. 결과 조회 또는 종료는 계속 가능하며, 같은 요청 재시도는 원래 열차 관측 후 60초 이내에만 가능합니다. 재시도에도 서버 요청 한도가 적용됩니다.</Text><Button title="같은 등록 요청 재시도" disabled={busy||storageBlocked||tokenChanged} onPress={()=>action('retry')}/></>}<Button title={session.phase==='PENDING'?'등록 결과 조회':'상태 새로고침'} disabled={busy||storageBlocked} onPress={()=>action('status')}/><Button title="시험 알림 보내기" disabled={busy||storageBlocked||tokenChanged||session.phase==='PENDING'} onPress={()=>action('test')}/><Button title="시험 감시 종료" disabled={busy||storageBlocked} onPress={()=>action('cancel')}/></>}
+  {session&&<>
+    <Text style={styles.help}>새 시험 감시는 서버 주소·API 키·세션 토큰을 함께 안전하게 저장합니다. 서버 주소를 바꿔도 등록한 서버로만 조회·종료합니다. API 키가 없는 이전 세션이나 키를 교체한 세션은 같은 서버의 API 키를 저장해 주세요.</Text>
+    <Text style={styles.help}>상태: {statusLabels[view?.status]||'조회 필요'} · 만료: {view?.expiresAt||(typeof session.expiresAt==='string'&&session.expiresAt)||'확인 불가'}</Text>
+    <Text style={styles.help}>전송: {delivery[view?.deliveryStatus]||'조회 필요'}</Text>
+    {view?.deliveryAcceptedAt&&<Text style={styles.help}>FCM 수락 시각 (UTC): {new Date(view.deliveryAcceptedAt).toISOString()}</Text>}
+    <Text style={styles.help}>조회: {polling[view?.pollStatus]||'조회 필요'}</Text>
+    <Text style={styles.warning}>API 키가 회수되었거나 조회·종료에 실패하면 등록한 서버의 연결 주소와 API 키를 확인하세요. 종료 확인 전까지 저장된 감시 정보는 유지됩니다. 세션은 최대 2시간 후 만료됩니다.</Text>
+    {tokenChanged&&<Text style={styles.warning}>기기 토큰 확인이 필요해 기존 감시를 자동 종료하려고 합니다. 종료 실패 시 기존 토큰으로 시험 알림이 전송될 수 있으니 서버 연결과 API 키를 확인하고 종료를 다시 시도하세요.</Text>}
+    {session.phase==='PENDING'&&<>
+      <Text style={styles.warning}>등록 결과 확인 대기 중입니다. 같은 ID·비밀·원래 요청을 보관하며 새 감시 등록을 차단합니다. 결과 조회 또는 종료는 계속 가능하며, 같은 요청 재시도는 원래 열차 관측 후 60초 이내에만 가능합니다. 재시도에도 서버 요청 한도가 적용됩니다.</Text>
+      <Button title="같은 등록 요청 재시도" disabled={busy||storageBlocked||tokenChanged} onPress={()=>action('retry')}/>
+    </>}
+    <Button title={session.phase==='PENDING'?'등록 결과 조회':'상태 새로고침'} disabled={busy||storageBlocked} onPress={()=>action('status')}/>
+    <Button title={testRetry?.id===session.id?`시험 알림 보내기 (${testRetry.seconds}초 후)`:'시험 알림 보내기'} disabled={busy||storageBlocked||tokenChanged||!canSendTestNotification(session,view,testRetry)} onPress={()=>action('test')}/>
+    <Button title="시험 감시 종료" disabled={busy||storageBlocked} onPress={()=>action('cancel')}/>
+  </>}
   {!!error&&<Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
  </View>;
 }

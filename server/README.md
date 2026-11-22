@@ -50,8 +50,10 @@ Spring Boot 4.1 / Java 17. PDF의 Java 21과 달리 현재 개발 환경에서 �
 
 - `POST /api/monitor-sessions`: Bearer 외에 앱이 미리 만든 `Idempotency-Key`(소문자 UUID v4)와 `X-Session-Token`(32바이트 난수의 소문자 hex 64자)이 필수입니다. JSON은 `lineId` (`2`), `trainId` (문자열), `direction` (`INNER` 또는 `OUTER`), `previousStation`, `destinationStation`, `fcmToken`, `mode` (`TEST`)입니다. 응답 `id`는 요청 UUID, `sessionToken`은 클라이언트 비밀이며 `status`, `mode`, `expiresAt`을 함께 반환합니다.
 - `GET /api/monitor-sessions/{id}`, `DELETE /api/monitor-sessions/{id}`: `X-Session-Token` 헤더로 소유 세션만 조회·취소합니다. 조회 응답에 토큰은 없습니다.
-- `POST /api/monitor-sessions/{id}/test`: 위 헤더로 명시적 시험 알림을 보냅니다. 세션당 30초, 프로세스 전체 분당 30회로 제한하며 자동 매칭과 별도입니다.
+- `POST /api/monitor-sessions/{id}/test`는 수동 시험 알림을 보냅니다. 세션당 30초에 1회, 프로세스 전체에서 최근 60초 동안 30회까지 허용합니다. 한도에 도달하면 HTTP 429와 두 한도가 모두 풀리기까지 남은 초를 올림한 `Retry-After`를 반환합니다. 세션이 비활성이거나 이미 전송 중이면 409입니다.
+- 수동 시험 알림을 전송하는 동안 같은 세션의 샘플이 일치하면 서버는 `SAMPLE_MATCHED`를 기록하고 진행 중인 전송 결과를 사용합니다. 이때 알림 전송은 한 번입니다.
 - 세션 `status`는 `TRACKING`, `SAMPLE_MATCHED`, `CANCELLED`, `EXPIRED`입니다. 샘플 매칭 후 해당 세션의 폴링은 중지됩니다. `deliveryStatus`는 `NONE`, `SENDING`, `FCM_ACCEPTED`, `UNAVAILABLE`, `FAILED`이며 전송 실패를 자동 재시도하지 않습니다. `FCM_ACCEPTED`는 Firebase의 요청 수락만 뜻하며 기기 도착·표시를 보장하지 않습니다.
+- `deliveryAcceptedAt`은 서버가 마지막 전송에 대해 FCM 수락 응답을 받은 UTC 시각입니다. 조회·취소 후에도 같은 시각을 반환하며, 새 전송이 시작되면 초기화합니다. 수락 기록이 없으면 값은 `null`입니다. 기기 표시 시각은 휴대폰에서 따로 확인합니다.
 - 같은 ID·세션 비밀·정규화한 본문은 같은 세션의 현재 결과를 반환하고 만료시각을 연장하거나 감시를 다시 켜지 않습니다. 다른 비밀·본문은 409, 형식 오류는 400입니다. 서버는 비밀과 요청의 해시를 보관하며 재생용 원문 세션 비밀을 저장하지 않습니다.
 - 앱은 ID와 비밀을 먼저 저장하므로 최초 응답을 잃어도 기존 GET/DELETE로 조회·종료할 수 있습니다. 등록보다 DELETE가 먼저 도착하면 CANCELLED 표식을 만들어 늦은 등록을 막습니다. 표식도 500개 한도와 2시간 만료·추가 1시간 보관에 포함됩니다. 서버 재시작·보관 만료·여러 인스턴스 사이의 중복 방지는 아직 보장하지 않습니다. [등록 복구 계약](../docs/registration-recovery.md)을 확인하세요.
 

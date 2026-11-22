@@ -15,6 +15,65 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class MonitorControllerTest {
+ @Test void testCooldownUsesRoundedUpRetryAfterAndAllowsExactDeadline() throws Exception {
+  var clock=new MonitorServiceTest.FakeClock();
+  var gateway=new MonitorServiceTest.Gateway();
+  var service=new MonitorService(gateway,clock,600);
+  var mvc=MockMvcBuilders.standaloneSetup(new MonitorController(service)).build();
+  var session=service.start(MonitorServiceTest.request());
+  var send=post("/api/monitor-sessions/{id}/test",session.id()).header("X-Session-Token",session.sessionToken());
+  mvc.perform(send).andExpect(status().isOk()).andExpect(jsonPath("$.deliveryAcceptedAt").value(clock.instant().toString()));
+  clock.current=clock.current.plusMillis(29_001);
+  mvc.perform(send).andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After","1"))
+      .andExpect(jsonPath("$.error").value("API_RATE_LIMITED"));
+  clock.current=clock.current.plusMillis(999);
+  mvc.perform(send).andExpect(status().isOk());
+  service.cancel(session.id(),session.sessionToken());
+  mvc.perform(send).andExpect(status().isConflict()).andExpect(header().doesNotExist("Retry-After"));
+  org.junit.jupiter.api.Assertions.assertEquals(2,gateway.calls.get());
+ }
+ @Test void acceptanceTimeSurvivesStatusReadsAndClearsOnTheNextFailedAttempt() throws Exception {
+  var clock=new MonitorServiceTest.FakeClock();
+  var gateway=new MonitorServiceTest.Gateway();
+  var service=new MonitorService(gateway,clock,600);
+  var mvc=MockMvcBuilders.standaloneSetup(new MonitorController(service)).build();
+  var session=service.start(MonitorServiceTest.request());
+  var send=post("/api/monitor-sessions/{id}/test",session.id()).header("X-Session-Token",session.sessionToken());
+  var lookup=get("/api/monitor-sessions/{id}",session.id()).header("X-Session-Token",session.sessionToken());
+  String accepted=clock.instant().toString();
+  mvc.perform(lookup).andExpect(jsonPath("$.deliveryAcceptedAt").doesNotExist());
+  mvc.perform(send).andExpect(jsonPath("$.deliveryAcceptedAt").value(accepted));
+  clock.advance(30);
+  mvc.perform(lookup).andExpect(jsonPath("$.deliveryAcceptedAt").value(accepted));
+  gateway.result=NotificationGateway.Result.FAILED;
+  mvc.perform(send).andExpect(jsonPath("$.deliveryStatus").value("FAILED"))
+      .andExpect(jsonPath("$.deliveryAcceptedAt").doesNotExist());
+  clock.advance(30);
+  gateway.result=NotificationGateway.Result.UNAVAILABLE;
+  mvc.perform(send).andExpect(jsonPath("$.deliveryStatus").value("UNAVAILABLE"))
+      .andExpect(jsonPath("$.deliveryAcceptedAt").doesNotExist());
+ }
+ @Test void sharedManualBudgetReportsTheLongerWaitAndRefillsAtOneMinute() throws Exception {
+  var clock=new MonitorServiceTest.FakeClock();
+  var gateway=new MonitorServiceTest.Gateway();
+  var service=new MonitorService(gateway,clock,600);
+  var mvc=MockMvcBuilders.standaloneSetup(new MonitorController(service)).build();
+  var session=service.start(MonitorServiceTest.request());
+  service.test(session.id(),session.sessionToken());
+  for(int i=1;i<30;i++){
+   var other=service.start(MonitorServiceTest.request());
+   service.test(other.id(),other.sessionToken());
+  }
+  var send=post("/api/monitor-sessions/{id}/test",session.id()).header("X-Session-Token",session.sessionToken());
+  clock.current=clock.current.plusMillis(200);
+  mvc.perform(send).andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After","60"))
+      .andExpect(jsonPath("$.error").value("API_RATE_LIMITED"));
+  clock.current=clock.current.plusMillis(59_799);
+  mvc.perform(send).andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After","1"));
+  clock.current=clock.current.plusMillis(1);
+  mvc.perform(send).andExpect(status().isOk());
+  org.junit.jupiter.api.Assertions.assertEquals(31,gateway.calls.get());
+ }
  @Test void fakeSampleProviderMatchesOneSessionAndStatusReportsTestDelivery() throws Exception {
   var sends=new java.util.concurrent.atomic.AtomicInteger();
   NotificationGateway gateway=new NotificationGateway(){public boolean available(){return true;}public Result send(String t,String p,String d,String m){sends.incrementAndGet();return Result.ACCEPTED;}};

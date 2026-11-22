@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Alert, AppState, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import * as Notifications from 'expo-notifications';
 import LiveTrains from './src/LiveTrains';
-import {readState,updateState,runMonitoringOperation,notify,disableMonitoring,requestNotificationPermissions} from './src/background';
+import {readState,updateState,runMonitoringOperation,subscribeToTripCompletion,notify,disableMonitoring,requestNotificationPermissions} from './src/background';
 const stations=require('./src/stations');
 const {addFavorite,findRoute}=require('./src/domain');
 Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})});
@@ -13,17 +13,23 @@ export default function App(){
  const [state,setState]=useState(defaults), [from,setFrom]=useState(''),[to,setTo]=useState(''),[query,setQuery]=useState(''),[select,setSelect]=useState('from'),[start,setStart]=useState('07:00'),[end,setEnd]=useState('09:00'),[ready,setReady]=useState(false),[busy,setBusy]=useState(false);
  const route=findRoute(stations,from,to);
  const actionLock=useRef(false);
+ const mounted=useRef(false);
  const [storageError,setStorageError]=useState('');
  async function reload(){
+  if(!mounted.current)return;
   try {
    const saved=await readState();
+   if(!mounted.current)return;
    setState({...defaults,...saved});setReady(true);setStorageError('');
-  }catch(e){setReady(false);setStorageError(e.message || '저장된 경로 정보를 읽지 못했습니다.');}
+  }catch(e){if(mounted.current){setReady(false);setStorageError(e.message || '저장된 경로 정보를 읽지 못했습니다.');}}
  }
  useEffect(()=>{
-  runMonitoringOperation(reload);
-  const sub=AppState.addEventListener('change',v=>{if(v==='active')runMonitoringOperation(reload)});
-  return ()=>sub.remove();
+  mounted.current=true;
+  const refresh=()=>runMonitoringOperation(reload);
+  const unsubscribe=subscribeToTripCompletion(refresh);
+  refresh();
+  const sub=AppState.addEventListener('change',v=>{if(v==='active')refresh()});
+  return ()=>{mounted.current=false;sub.remove();unsubscribe();};
  },[]);
  async function update(fn){const next=await updateState(s=>fn({...defaults,...s}));setState(next);return next;}
  async function run(fn,allowUnready=false){

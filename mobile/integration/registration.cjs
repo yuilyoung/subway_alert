@@ -39,7 +39,21 @@ async function run() {
   assert.equal((await recovered.status(connection)).status, 'TRACKING');
   const owner = recovered.getState().record;
   assert.equal(owner.phase, 'ACTIVE');
-  assert.equal((await monitorRequest(connection.server, owner, 'test', true, fetch)).deliveryStatus, 'UNAVAILABLE');
+  let manualResponseLost = false;
+  await assert.rejects(monitorRequest(connection.server, owner, 'test', true, async (url, options) => {
+    const response = await fetch(url, options);
+    manualResponseLost = response.ok;
+    await response.body.cancel();
+    throw Error('Simulated response loss');
+  }));
+  assert.ok(manualResponseLost, 'The server must have processed the manual push before losing the response');
+  const afterLoss = await recovered.status(connection);
+  assert.equal(afterLoss.status, 'TRACKING');
+  assert.equal(afterLoss.deliveryStatus, 'UNAVAILABLE');
+  await assert.rejects(monitorRequest(connection.server, owner, 'test', true, fetch),
+    e => e.status === 429 && Number.isInteger(e.retryAfter) && e.retryAfter >= 1 && e.retryAfter <= 30);
+  assert.equal((await recovered.status(connection)).status, 'TRACKING');
+  assert.equal(recovered.getState().record.id, pending.id);
   assert.equal((await recovered.cancel(connection)).status, 'CANCELLED');
   assert.equal(values.size, 0);
   assert.equal((await monitorRequest(connection.server, owner, 'status', true, fetch)).status, 'CANCELLED');
@@ -53,5 +67,5 @@ async function run() {
   assert.equal(values.size, 0);
 }
 
-run().then(() => console.log('Mobile client → Spring Boot: response loss, retry, status, disabled FCM, cancellation and legacy cleanup passed'))
+run().then(() => console.log('Mobile client → Spring Boot: registration recovery, lost manual push response, cooldown with retained session, cancellation and legacy cleanup passed'))
   .catch(() => { console.error('Mobile registration integration failed'); process.exitCode = 1; });

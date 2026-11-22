@@ -37,14 +37,14 @@ public final class MonitorController {
     catch(IllegalArgumentException e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid registration identity");}
     catch(MonitorService.CapacityExceeded e){throw capacityExceeded();}
   }
-  @ExceptionHandler(MonitorService.CreationRateLimited.class)
-  public ResponseEntity<Map<String,String>> creationRateLimited(MonitorService.CreationRateLimited e){
+  @ExceptionHandler(MonitorService.RateLimited.class)
+  public ResponseEntity<Map<String,String>> rateLimited(MonitorService.RateLimited e){
     return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header(HttpHeaders.RETRY_AFTER,Long.toString(e.retryAfter))
         .body(Map.of("error","API_RATE_LIMITED"));
   }
   @PostMapping("/{id}/test") public MonitorService.StatusResponse test(@PathVariable UUID id,@RequestHeader(value="X-Session-Token",required=false) String secret){
     try{return service.test(id,secret);}catch(MonitorService.NotFound e){throw notFound();}
-    catch(MonitorService.Conflict e){throw new ResponseStatusException(HttpStatus.CONFLICT,"Session inactive or test rate limited");}
+    catch(MonitorService.Conflict e){throw new ResponseStatusException(HttpStatus.CONFLICT,"Session inactive or delivery in progress");}
   }
   private static String singleHeader(HttpServletRequest request,String name){
     var values=Collections.list(request.getHeaders(name));

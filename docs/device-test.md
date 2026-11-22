@@ -71,7 +71,21 @@ gh auth status && python3 -c 'import base64, pathlib, sys; from deploy.prepare_a
 GitHub Actions의 해당 CI 실행에서 `subway-alert-firebase-test-arm64-<run_number>` Artifact를 내려받아 압축을 풀고 기기에 APK를 설치합니다. 이 secret에는 `com.yuilyoung.subwayalert`용 Android 클라이언트 설정만 올립니다. 서버 서비스 계정과 서울 키는 Mac에 둡니다. [Android 빌드 안내](../mobile/README.md)
 
 1. 앱의 서버 연결 화면에 해당 빌드의 origin과 `device.env`의 참가자용 키 하나를 저장하고 Android 알림 권한을 허용합니다. **2호선 열차 조회**를 눌러 **서울시 공개 샘플** 표시(`SAMPLE`)에서 정보 시각이 최근 60초 이내인 일반 열차를 선택하고 서로 다른 직전역·목적지를 입력해 시험 감시를 시작합니다. 최신 일반 열차가 없으면 잠시 후 조회하세요.
-2. **시험 알림 보내기**를 누른 뒤 앱의 **FCM 서버가 전송 요청을 수락함** 표시(`FCM_ACCEPTED`)와 휴대폰의 실제 알림 표시 시각을 각각 확인합니다. `UNAVAILABLE`이면 서버 파일과 프로젝트 설정을, `FAILED`이면 해당 프로젝트의 FCM 전송 권한과 기기 등록 상태를 확인합니다. 시험 종료 후 **시험 감시 종료**를 누릅니다.
+2. **잠금 화면 수신**을 시험하려면 기기에서 이 앱의 잠금 화면 알림을 허용합니다. 앱에 **시험 감시 중**이 표시되면 위에서 `device_compose`를 정의한 Mac 터미널에서 아래 명령을 실행하세요. 전용 시험 백엔드가 일시 정지되면 휴대폰에서 **시험 알림 보내기**를 한 번 누르고 전원 버튼으로 화면을 잠급니다. 화면이 꺼진 것을 확인한 뒤 터미널에서 Enter를 누르면 백엔드가 전송 요청을 처리합니다. 앱 요청 제한 시간은 10초입니다.
+
+   ```sh
+   (
+     set -e
+     device_compose pause backend
+     trap 'device_compose unpause backend' EXIT
+     echo '시험 알림 보내기를 누르고 휴대폰을 잠근 뒤 Enter를 누르세요.'
+     IFS= read -r answer
+   )
+   ```
+
+   중단 후 백엔드가 일시 정지 상태라면 `device_compose unpause backend`로 재개합니다.
+3. 잠금 화면에 **[시험] 지하철 하차 알림**이 실제 표시된 시각을 기록합니다. 잠금을 풀고 **상태 새로고침**을 눌러 `FCM_ACCEPTED`와 서버 수락 시각(UTC)을 확인하고, 기기의 표시 시각에도 시간대를 적습니다. 요청이 시간 초과된 경우에도 먼저 상태를 조회합니다. `UNAVAILABLE`이면 서버의 Firebase 설정을, `FAILED`이면 해당 프로젝트의 발송 권한과 기기 등록 상태를 확인합니다. 시험 중 Android가 앱 프로세스를 종료해 재실행 시 기존 세션이 자동 종료된 경우에는 새 TEST 세션으로 다시 검사합니다.
+4. **시험 감시 종료**를 누르고 새 감시 등록 화면으로 돌아오는지 확인합니다. 시험 기록에는 앱·서버 커밋, 기기 모델·Android 버전, 서버 수락 시각, 잠금 화면 표시 시각, 종료 결과를 남깁니다.
 
 ## 4. 서울 발급 키로 한 번 조회
 

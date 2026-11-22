@@ -16,9 +16,10 @@ function validateAccessToken(value) {
 }
 
 class ApiResponseError extends Error {
-  constructor(status,retryAfter=null) {
+  constructor(status,retryAfter=null,action) {
     const message=status===401?'접근 키가 없거나 만료·회수되었습니다. 서버 연결 키를 확인하세요.':
       status===403?'이 요청을 수행할 권한이 없습니다.':
+      status===409&&action==='test'?'지금은 시험 알림을 보낼 수 없습니다. 감시 상태를 새로고침하고 전송 중이면 잠시 기다려 주세요.':
       status===409?'기존 등록 정보와 충돌합니다. 저장된 감시 결과를 조회하거나 종료한 뒤 다시 등록하세요.':
       status===429?`요청 한도에 도달했습니다. ${retryAfter?`${retryAfter}초 후에 `:''}다시 시도하세요.`:
       status===503?'서버가 요청을 처리할 수 없습니다. 서버의 접근 키 설정과 실행 상태를 확인하세요.':
@@ -27,7 +28,7 @@ class ApiResponseError extends Error {
   }
 }
 
-async function requestJson(server,path,options={},accessToken,development=false,fetchImpl) {
+async function requestJson(server,path,options={},accessToken,development=false,fetchImpl,action) {
   const base=validateServerUrl(server,development),token=validateAccessToken(accessToken);
   if(typeof path!=='string' || !path.startsWith('/api/') || /[\\\r\n#]/.test(path)) throw new Error('서버 요청 경로가 올바르지 않습니다.');
   if(typeof fetchImpl!=='function') throw new Error('안전한 네이티브 전송 수단이 필요합니다.');
@@ -38,11 +39,12 @@ async function requestJson(server,path,options={},accessToken,development=false,
     if(!response.ok) {
       const raw=response.headers?.get?.('Retry-After');
       const retryAfter=typeof raw==='string' && /^\d{1,5}$/.test(raw) && Number(raw)>0 && Number(raw)<=86400?Number(raw):null;
-      throw new ApiResponseError(response.status,retryAfter);
+      throw new ApiResponseError(response.status,retryAfter,action);
     }
     return await response.json();
   } catch(error) {
     if(error instanceof ApiResponseError) throw error;
+    if(action==='test') throw new Error('시험 알림이 이미 전송되었을 수 있습니다. 감시 상태를 새로고침해 전송 결과를 확인하세요.');
     if((options.method||'GET')!=='GET') throw new Error('요청 결과를 확인할 수 없습니다. 서버에서 이미 처리되었을 수 있습니다. 저장된 감시 결과를 조회하거나 동일 요청을 명시적으로 재시도하거나 종료하세요. 세션은 최대 2시간 후 만료됩니다.');
     throw new Error(abort.signal.aborted?'서버 응답 시간이 초과되었습니다.':'서버에 연결할 수 없거나 응답을 읽을 수 없습니다.');
   } finally {clearTimeout(timer);}

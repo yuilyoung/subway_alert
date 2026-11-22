@@ -47,20 +47,20 @@ public final class MonitorService {
     @Override public String toString(){return "StartResponse[id="+id+", sessionToken=redacted, status="+status+"]";}
   }
   public record StatusResponse(UUID id,String status,String mode,Instant expiresAt,
-                               String deliveryStatus,String pollStatus) { }
+                               String deliveryStatus,String pollStatus,Instant deliveryAcceptedAt) { }
   public static final class NotFound extends RuntimeException { }
   public static final class Conflict extends RuntimeException { public Conflict(String msg){super(msg);} }
   public static final class CapacityExceeded extends RuntimeException { }
-  static final class CreationRateLimited extends RuntimeException {
+  static final class RateLimited extends RuntimeException {
     final long retryAfter;
-    CreationRateLimited(long retryAfter){this.retryAfter=retryAfter;}
+    RateLimited(long retryAfter){this.retryAfter=retryAfter;}
   }
 
   private static final class Session {
     final UUID id; final byte[] tokenHash,requestFingerprint;
     final String previous,destination; final Instant expires; final LiveTrainMatcher matcher;
     String fcmToken; volatile String status; String delivery="NONE";
-    Instant lastManualTest; boolean inFlight;
+    Instant lastManualTest,deliveryAcceptedAt; boolean inFlight;
     private Session(UUID id,byte[] tokenHash,byte[] requestFingerprint,String previous,String destination,
                     Instant expires,String fcmToken,LiveTrainMatcher matcher,String status) {
       this.id=id;this.tokenHash=tokenHash;this.requestFingerprint=requestFingerprint;
@@ -125,10 +125,10 @@ public final class MonitorService {
       // Older servers chose the UUID themselves and issued 32 random bytes as unpadded base64url.
       // No delayed registration with that capability can create a session on this server.
       if(validUuid(id) && secret!=null && secret.matches("[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]"))
-        return new StatusResponse(id,"CANCELLED","TEST",now,"NONE",pollStatus);
+        return new StatusResponse(id,"CANCELLED","TEST",now,"NONE",pollStatus,null);
       validateIdentity(id,secret);
       long retryAfter=creationBudget.getAsLong();
-      if(retryAfter>0)throw new CreationRateLimited(retryAfter);
+      if(retryAfter>0)throw new RateLimited(retryAfter);
       if(sessions.size()>=MAX_SESSIONS)throw new CapacityExceeded();
       s=Session.cancelled(id,digest(secret),now);sessions.put(id,s);
     }else if(!authorized(s,secret))throw new NotFound();
@@ -142,15 +142,20 @@ public final class MonitorService {
   public StatusResponse test(UUID id,String secret){
     Session s=authorized(id,secret);String target;
     synchronized(s){
-      Instant now=clock.instant();expire(s,now);
-      if(!s.status.equals("TRACKING"))throw new Conflict("Session is not active");
-      if(s.inFlight || (s.lastManualTest!=null && now.isBefore(s.lastManualTest.plusSeconds(30))))throw new Conflict("Try again later");
       synchronized(manualAttempts){
+        Instant now=clock.instant();expire(s,now);
+        if(!s.status.equals("TRACKING"))throw new Conflict("Session is not active");
+        if(s.inFlight)throw new Conflict("A delivery is already in progress");
         while(!manualAttempts.isEmpty()&&!manualAttempts.peekFirst().isAfter(now.minusSeconds(60)))manualAttempts.removeFirst();
-        if(manualAttempts.size()>=MANUAL_TESTS_PER_MINUTE)throw new Conflict("Test rate limit reached");
+        long retryAfter=s.lastManualTest==null?0:remainingSeconds(now,s.lastManualTest.plusSeconds(30));
+        if(manualAttempts.size()>=MANUAL_TESTS_PER_MINUTE){
+          retryAfter=Math.max(retryAfter,remainingSeconds(now,manualAttempts.getFirst().plusSeconds(60)));
+        }
+        if(retryAfter>0)throw new RateLimited(retryAfter);
         manualAttempts.addLast(now);
+        s.lastManualTest=now;
       }
-      s.lastManualTest=now;target=claimDelivery(s);
+      target=claimDelivery(s);
     }
     deliverOutsideLock(s,target);
     synchronized(s){return view(s);}
@@ -162,21 +167,28 @@ public final class MonitorService {
     pollStatus="SAMPLE_PARTIAL";
     java.util.List<Session> snapshot;
     synchronized(this){prune(clock.instant());snapshot=java.util.List.copyOf(sessions.values());}
+    // Record overlaps before an unrelated network send can delay the rest of this sample.
+    for(Session s:snapshot)claimSampleMatch(s,result.trains(),false);
     int deliveries=0;
     for(Session s:snapshot){
-      if(deliveries>=MAX_DELIVERIES_PER_POLL)break;
-      String target=null;
-      synchronized(s){
-        // Another delivery can be slow; re-read time before checking each candidate.
-        Instant now=clock.instant();expire(s,now);
-        if(!s.status.equals("TRACKING") || s.inFlight)continue;
-        for(var train:result.trains()){
-          if(s.matcher.consider("SAMPLE",train,now)==LiveTrainMatcher.Decision.SAMPLE_MATCH){
-            target=claimDelivery(s);s.status="SAMPLE_MATCHED";s.fcmToken=null;break;
-          }
+      String target=claimSampleMatch(s,result.trains(),deliveries<MAX_DELIVERIES_PER_POLL);
+      if(target!=null){deliveries++;deliverOutsideLock(s,target);}
+    }
+  }
+
+  private String claimSampleMatch(Session s,java.util.List<SeoulTrainProvider.Train> trains,boolean allowNewDelivery){
+    synchronized(s){
+      Instant now=clock.instant();expire(s,now);
+      if(!s.status.equals("TRACKING") || (!s.inFlight && !allowNewDelivery))return null;
+      for(var train:trains){
+        if(s.matcher.consider("SAMPLE",train,now)==LiveTrainMatcher.Decision.SAMPLE_MATCH){
+          // An ongoing manual send carries the same TEST notification for this session.
+          String target=s.inFlight?null:claimDelivery(s);
+          s.status="SAMPLE_MATCHED";s.fcmToken=null;
+          return target;
         }
       }
-      if(target!=null){deliveries++;deliverOutsideLock(s,target);}
+      return null;
     }
   }
 
@@ -197,13 +209,18 @@ public final class MonitorService {
     }finally{pollLock.unlock();}
   }
   /** Caller holds the individual session lock. */
-  private static String claimDelivery(Session s){s.inFlight=true;s.delivery="SENDING";return s.fcmToken;}
+  private static String claimDelivery(Session s){s.inFlight=true;s.delivery="SENDING";s.deliveryAcceptedAt=null;return s.fcmToken;}
+  private static long remainingSeconds(Instant now,Instant deadline){
+    Duration remaining=Duration.between(now,deadline);
+    return remaining.isNegative()?0:remaining.getSeconds()+(remaining.getNano()==0?0:1);
+  }
   private void deliverOutsideLock(Session s,String target){
     NotificationGateway.Result result;
     try{result=gateway.available()?gateway.send(target,s.previous,s.destination,"TEST"):NotificationGateway.Result.UNAVAILABLE;}
     catch(RuntimeException e){result=NotificationGateway.Result.FAILED;}
     synchronized(s){
       s.delivery=result==null?"FAILED":switch(result){case ACCEPTED->"FCM_ACCEPTED";case UNAVAILABLE->"UNAVAILABLE";case FAILED->"FAILED";};
+      if(result==NotificationGateway.Result.ACCEPTED)s.deliveryAcceptedAt=clock.instant();
       s.inFlight=false;
     }
   }
@@ -239,7 +256,7 @@ public final class MonitorService {
     return digest(String.join("\u0000",req.lineId(),req.trainId(),req.direction(),req.previousStation(),
         req.destinationStation(),req.fcmToken(),req.mode()));
   }
-  private StatusResponse view(Session s){return new StatusResponse(s.id,s.status,"TEST",s.expires,s.delivery,pollStatus);}
+  private StatusResponse view(Session s){return new StatusResponse(s.id,s.status,"TEST",s.expires,s.delivery,pollStatus,s.deliveryAcceptedAt);}
   private void prune(Instant now){
     for(Session s:sessions.values())synchronized(s){expire(s,now);}
     sessions.values().removeIf(s->!now.isBefore(s.expires.plus(RETENTION)));

@@ -28,5 +28,10 @@
     "glob@13": "14.0.6",
     "minimatch@9 || 10": "11.0.9",
     "@expo/metro@54.2.0": "55.1.2"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@react-native/babel-preset": "0.81.5",
+    "react-test-renderer": "19.1.0"
   }
 }

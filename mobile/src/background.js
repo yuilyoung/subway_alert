@@ -9,8 +9,8 @@ const store=createStorage(AsyncStorage);
 export const readState=store.readState;
 export const updateState=change=>updateMonitoringConfig(store,change,{enable:enableMonitoring,disable:disableMonitoring});
 export const notify=(title,body)=>scheduleLocationNotification(Notifications,title,body);
-const {handleLocations,runExclusive} = createLocationTask({storage:AsyncStorage, store, notify, stopMonitoring:disableMonitoring});
-export {runExclusive as runMonitoringOperation};
+const {handleLocations,runExclusive,subscribeToTripCompletion} = createLocationTask({storage:AsyncStorage, store, notify, stopMonitoring:disableMonitoring});
+export {runExclusive as runMonitoringOperation,subscribeToTripCompletion};
 TaskManager.defineTask(TASK, async ({data,error}) => {
   if (!error) await handleLocations(data?.locations);
 });
